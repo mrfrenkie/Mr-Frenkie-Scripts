@@ -1,7 +1,10 @@
--- Frenkie Item Properties 2.6
--- Основной скрипт просто запускает UI модуль
+-- @description Frenkie Item Properties
+-- @version 2.6.0
+-- @author Mr. Frenkie
+-- @link https://github.com/mrfrenkie/Mr-Frenkie-Scripts
+-- @changelog
+--   Initial ReaPack release
 
--- Заменить абсолютные пути на:
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
 local script_dir = script_path:match("(.*[\\/])") or ""
 
