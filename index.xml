@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="Mr. Frenkie ReaScripts">
+  <category name="Mr. Frenkie Scripts">
+    <reapack name="Frenkie Recent Projects.lua" type="script" desc="Recent projects manager">
+      <version name="1.0.0" author="Mr. Frenkie" time="2026-01-19T12:00:00Z">
+        <source main="main" file="Frenkie Recent Projects/Frenkie Recent Projects.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Frenkie%20Recent%20Projects.lua</source>
+        <source file="Frenkie Recent Projects/Functions/Frenkie Recent Projects Observer.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/Frenkie%20Recent%20Projects%20Observer.lua</source>
+        <source file="Frenkie Recent Projects/Functions/List.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/List.lua</source>
+        <source file="Frenkie Recent Projects/Functions/MiniParser.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/MiniParser.lua</source>
+        <source file="Frenkie Recent Projects/Functions/My Resent Projects List.txt">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/My%20Resent%20Projects%20List.txt</source>
+        <source file="Frenkie Recent Projects/Functions/Theme Dark.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/Theme%20Dark.lua</source>
+        <source file="Frenkie Recent Projects/Functions/Theme Light.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/Theme%20Light.lua</source>
+        <source file="Frenkie Recent Projects/Functions/UI.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/UI.lua</source>
+        <source file="Frenkie Recent Projects/Functions/Fonts/Roboto-Regular.ttf">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/Fonts/Roboto-Regular.ttf</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+      </version>
+      <metadata>
+        <link rel="website">https://github.com/frenkie/ReaPack</link>
+        <description><![CDATA[{\rtf1 {\fonttbl {\f0 Helvetica;}} \f0\fs40 Frenkie Recent Projects script}]]></description>
+      </metadata>
+    </reapack>
+  </category>
+  <metadata>
+    <link rel="website">https://github.com/frenkie/ReaPack</link>
+    <description><![CDATA[{\rtf1 {\fonttbl {\f0 Helvetica;}} \f0\fs40 Mr. Frenkie ReaScripts repository}]]></description>
+  </metadata>
+</index>
