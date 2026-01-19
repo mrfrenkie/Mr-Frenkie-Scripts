@@ -1,6 +1,6 @@
--- Frenkie Recent Projects - Main Entry Point
--- Author: Mr. Frenkie / ChatGPT
--- Description: Recent Projects Manager v.1.0
+-- @description Frenkie Recent Projects
+-- @version 1.0.0
+-- @author Mr. Frenkie / ChatGPT
 ---@diagnostic disable: undefined-global -- reaper is provided by REAPER at runtime
 
 -- Check for ReaImGUI
