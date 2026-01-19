@@ -19,7 +19,7 @@
       </metadata>
     </reapack>
     <reapack name="Frenkie Item Properties" type="script" desc="Frenkie Item Properties">
-      <version name="2.6" author="Mr. Frenkie" time="2026-01-20T12:00:00Z">
+      <version name="2.6.0" author="Mr. Frenkie" time="2026-01-20T12:00:00Z">
         <source main="main" file="Mr. Frenkie Item Properties/Frenkie Item Properties.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/Frenkie%20Item%20Properties.lua</source>
         <source file="Mr. Frenkie Item Properties/ItemProperties/Core.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/ItemProperties/Core.lua</source>
         <source file="Mr. Frenkie Item Properties/ItemProperties/Fader.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/ItemProperties/Fader.lua</source>
