@@ -47,6 +47,15 @@ local function CreateFont(file_path)
     return r.ImGui_CreateFont(file_path)
 end
 
+local function SafeCreateImage(path)
+    local f = io.open(path, 'rb')
+    if not f then return nil end
+    f:close()
+    local ok, img = pcall(r.ImGui_CreateImage, path)
+    if not ok then return nil end
+    return img
+end
+
 local function PushFont(ctx, font, size)
     r.ImGui_PushFont(ctx, font, size)
 end
@@ -60,19 +69,10 @@ end
 
 local function LoadIcon(dir, name)
     local png = dir .. name .. '.png'
-    local img = nil
-    local f = io.open(png, 'rb')
-    if f then
-        f:close()
-        img = r.ImGui_CreateImage(png)
-    end
+    local img = SafeCreateImage(png)
     if not img then
         local d = dir .. 'default-icon.png'
-        local df = io.open(d, 'rb')
-        if df then
-            df:close()
-            img = r.ImGui_CreateImage(d)
-        end
+        img = SafeCreateImage(d)
     end
     return img
 end
@@ -104,9 +104,9 @@ function EnsureImGuiContext()
         end
 
         local icon_path = script_dir .. 'icons/'
-        audio_icon = r.ImGui_CreateImage(icon_path .. 'audio-item.png')
-        midi_icon = r.ImGui_CreateImage(icon_path .. 'midi-item.png')
-        track_icon = r.ImGui_CreateImage(icon_path .. 'track-icon.png')
+        audio_icon = SafeCreateImage(icon_path .. 'audio-item.png')
+        midi_icon = SafeCreateImage(icon_path .. 'midi-item.png')
+        track_icon = SafeCreateImage(icon_path .. 'track-icon.png')
         loop_icon_looped = LoadIcon(icon_path, 'looped')
         loop_icon_unlooped = LoadIcon(icon_path, 'unlooped')
         loop_icon_mixed = LoadIcon(icon_path, 'looped mixed')
