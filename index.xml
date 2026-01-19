@@ -3,7 +3,7 @@
   <category name="Mr. Frenkie Scripts">
     <reapack name="Frenkie Recent Projects.lua" type="script" desc="Recent projects manager">
       <version name="1.0.0" author="Mr. Frenkie" time="2026-01-19T12:00:00Z">
-        <source main="main" file="Frenkie Recent Projects/Frenkie Recent Projects.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Frenkie%20Recent%20Projects.lua</source>
+        <source main="main" file="Frenkie Recent Projects/Open Frenkie Recent Projects.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Open%20Frenkie%20Recent%20Projects.lua</source>
         <source file="Frenkie Recent Projects/Functions/Frenkie Recent Projects Observer.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/Frenkie%20Recent%20Projects%20Observer.lua</source>
         <source file="Frenkie Recent Projects/Functions/List.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/List.lua</source>
         <source file="Frenkie Recent Projects/Functions/MiniParser.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Frenkie%20Recent%20Projects/Functions/MiniParser.lua</source>
