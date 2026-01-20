@@ -1,6 +1,6 @@
--- @description Frenkie Recent Projects
--- @version 1.0.0
--- @author Mr. Frenkie / ChatGPT
+-- Frenkie Recent Projects - Main Entry Point
+-- Author: Mr. Frenkie / ChatGPT
+-- Description: Recent Projects Manager v.1.0
 ---@diagnostic disable: undefined-global -- reaper is provided by REAPER at runtime
 
 -- Check for ReaImGUI
@@ -228,13 +228,6 @@ local function load_settings()
     end
 
     do
-        local keep_player_open = tostring(reaper.GetExtState(settings_section, "keep_player_open") or "")
-        if keep_player_open ~= "" then
-            settings.keep_player_open = (keep_player_open == "1" or keep_player_open == "true")
-        end
-    end
-
-    do
         local pinned_raw = tostring(reaper.GetExtState(settings_section, PINNED_KEY) or "")
         local pinned = {}
         for line in (pinned_raw .. "\n"):gmatch("(.-)\n") do
@@ -279,9 +272,6 @@ local function save_settings(settings)
     end
     if settings.compact_view ~= nil then
         reaper.SetExtState(settings_section, "compact_view", settings.compact_view and "1" or "0", true)
-    end
-    if settings.keep_player_open ~= nil then
-        reaper.SetExtState(settings_section, "keep_player_open", settings.keep_player_open and "1" or "0", true)
     end
 
     if settings.theme ~= nil then

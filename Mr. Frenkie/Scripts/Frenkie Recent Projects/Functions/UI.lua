@@ -26,6 +26,8 @@ local ICON_STOP = "■"
 local ICON_LIST_VIEW = "☰"
 local ICON_PIN = "◉"
 local ICON_PIN_HOVER = "◎"
+local ICON_CLOSE = "×"
+local ICON_CLOSE_HOVER = "×"
 local ICON_MDI_REPEAT = "↺"
 local first_frame = true
 local font_size = 15.0
@@ -199,7 +201,17 @@ local function color_set_alpha(color, alpha)
     if a > 255 then a = 255 end
     return (math.floor(c / 256) * 256) + a
 end
+local function color_mul_rgb(color, factor)
+    if reaper.ImGui_ColorConvertU32ToDouble4 and reaper.ImGui_ColorConvertDouble4ToU32 then
+        local r, g, b, a = reaper.ImGui_ColorConvertU32ToDouble4(color)
+        local f = tonumber(factor) or 1.0
+        return reaper.ImGui_ColorConvertDouble4ToU32(r * f, g * f, b * f, a)
+    end
+    return color
+end
 local bottom_panel_ever_opened = false
+local bottom_player_closed = false
+local last_preview_playing = false
 local undock_next_frame = false
 local preview_vol_ignore_until = 0.0
 local meta_panel_h_current = 0
@@ -482,7 +494,7 @@ local function draw_uix_disabled_button(imgui_ctx, label, w, h)
     return false
 end
 
-local function draw_transport_icon_button(imgui_ctx, id, icon_text, size, is_enabled, is_active)
+local function draw_transport_icon_button(imgui_ctx, id, icon_text, size, is_enabled, is_active, style)
     local btn_size = size or reaper.ImGui_GetFrameHeight(imgui_ctx)
     local x, y = reaper.ImGui_GetCursorScreenPos(imgui_ctx)
     reaper.ImGui_InvisibleButton(imgui_ctx, id, btn_size, btn_size)
@@ -490,16 +502,31 @@ local function draw_transport_icon_button(imgui_ctx, id, icon_text, size, is_ena
     local clicked = reaper.ImGui_IsItemClicked(imgui_ctx, 0)
     local draw_list = reaper.ImGui_GetWindowDrawList(imgui_ctx)
     local col
-    if not is_enabled then
-        col = COLOR_DARK_30
-    elseif is_active then
-        if icon_text == ICON_MDI_REPEAT then
-            col = hovered and COLOR_ACCENT_GREEN or COLOR_ACCENT_GREEN
+    local open_row_style = style and style.variant == "open_row"
+    if open_row_style then
+        if not is_enabled then
+            col = color_mul_rgb(COLOR_TEXT_MUTED, 0.85)
+        elseif is_active then
+            col = COLOR_TEXT_BLACK
         else
-            col = hovered and COLOR_ACCENT or COLOR_TEXT
+            if hovered then
+                col = COLOR_TEXT_BLACK
+            else
+                col = color_mul_rgb(COLOR_TEXT_MUTED, 0.35)
+            end
         end
     else
-        col = hovered and COLOR_TEXT or COLOR_TEXT_MUTED
+        if not is_enabled then
+            col = COLOR_DARK_30
+        elseif is_active then
+            if icon_text == ICON_MDI_REPEAT then
+                col = COLOR_ACCENT_GREEN
+            else
+                col = hovered and COLOR_ACCENT or COLOR_TEXT
+            end
+        else
+            col = hovered and COLOR_TEXT or COLOR_TEXT_MUTED
+        end
     end
     local font_pushed = false
     if font and reaper.ImGui_PushFont then
@@ -2106,64 +2133,6 @@ local function draw_menu_from_table(ctx, items, env)
     end
 end
 
-local function show_window_context_menu(app_state)
-    if not reaper.ImGui_BeginPopupContextWindow then
-        return
-    end
-    local color_count, var_count = push_context_menu_style(ctx)
-    local opened = reaper.ImGui_BeginPopupContextWindow(ctx)
-    if not opened then
-        pop_context_menu_style(ctx, color_count, var_count)
-        return
-    end
-
-    app_state.settings = app_state.settings or {}
-    local settings = app_state.settings
-    draw_menu_from_table(ctx, {
-        {
-            label = "Keep Player Open",
-            checked = function(env)
-                return env.settings.keep_player_open == true
-            end,
-            action = function(env)
-                env.settings.keep_player_open = not (env.settings.keep_player_open == true)
-                if env.app_state.save_settings then
-                    env.app_state.save_settings(env.settings)
-                end
-            end
-        },
-    }, { app_state = app_state, settings = settings })
-
-    pop_context_menu_style(ctx, color_count, var_count)
-    reaper.ImGui_EndPopup(ctx)
-end
-
-local function show_bottom_player_context_menu(app_state)
-    if not (reaper.ImGui_IsWindowHovered and reaper.ImGui_IsMouseClicked and reaper.ImGui_OpenPopup and reaper.ImGui_BeginPopup and reaper.ImGui_EndPopup) then
-        return
-    end
-
-    if reaper.ImGui_IsWindowHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 1) then
-        reaper.ImGui_OpenPopup(ctx, "bottom_player_context")
-    end
-
-    local color_count, var_count = push_context_menu_style(ctx)
-    if reaper.ImGui_BeginPopup(ctx, "bottom_player_context") then
-        app_state.settings = app_state.settings or {}
-        local settings = app_state.settings
-        local keep = settings.keep_player_open == true
-        local clicked = reaper.ImGui_MenuItem(ctx, "Keep Player Open", nil, keep)
-        if clicked then
-            settings.keep_player_open = not keep
-            if app_state.save_settings then
-                app_state.save_settings(settings)
-            end
-        end
-        reaper.ImGui_EndPopup(ctx)
-    end
-    pop_context_menu_style(ctx, color_count, var_count)
-end
-
 local function show_context_menu(app_state, project)
     local is_unavailable = project and project.is_unavailable
     if is_unavailable then
@@ -2758,7 +2727,14 @@ function UI.draw(app_state)
                 status = ProjectList.get_preview_status and ProjectList.get_preview_status()
             end
         end
-        local show_bottom_player = status and status.playing == true
+
+        local is_playing_preview = status and status.playing == true
+        if is_playing_preview and not last_preview_playing then
+            bottom_player_closed = false
+        end
+        last_preview_playing = is_playing_preview
+
+        local show_bottom_player = is_playing_preview and (not bottom_player_closed)
         if show_bottom_player then
             bottom_panel_ever_opened = true
         end
@@ -2807,13 +2783,12 @@ function UI.draw(app_state)
         local base_footer = 1
         local default_bottom_panel_h = math.max(70, math.floor(frame_h * 5.0))
         app_state.settings = app_state.settings or {}
-        local keep_player_open = app_state.settings.keep_player_open == true
         local bottom_panel_pref_h = tonumber(app_state.settings.bottom_panel_h)
         if bottom_panel_pref_h == nil then
             bottom_panel_pref_h = default_bottom_panel_h
             app_state.settings.bottom_panel_h = bottom_panel_pref_h
         end
-        local show_bottom_panel_ui = bottom_panel_ever_opened or keep_player_open
+        local show_bottom_panel_ui = bottom_panel_ever_opened and (not bottom_player_closed)
         local idle_bottom_panel_h = math.max(70, math.floor(frame_h * 4.0))
         local base_bottom_panel_h = show_bottom_panel_ui and (player_has_audio and bottom_panel_pref_h or idle_bottom_panel_h) or 0
         local splitter_h = 0
@@ -2840,7 +2815,7 @@ function UI.draw(app_state)
         local dt_bottom = now_bottom - (bottom_panel_last_t or now_bottom)
         bottom_panel_last_t = now_bottom
 
-        if show_bottom_player or (keep_player_open and bottom_panel_ever_opened) then
+        if show_bottom_player or show_bottom_panel_ui then
             local clamped_base_h = math.max(min_bottom_panel_h, math.min(base_bottom_panel_h, max_bottom_panel_h))
             if bottom_splitter_active then
                 local _, my = reaper.ImGui_GetMousePos(ctx)
@@ -3048,6 +3023,7 @@ function UI.draw(app_state)
                 local title_top_y = row_visual_top + math.floor(slack / 2)
 
                 local name_text_y = title_top_y + math.floor((name_block_h - text_h) / 2)
+                local name_center_y = name_text_y + math.floor(text_h * 0.5)
                 if compact_view then
                     name_text_y = name_text_y - 1
                 end
@@ -3189,6 +3165,8 @@ function UI.draw(app_state)
                                 compact_font_pushed = true
                             end
                         end
+                        local meta_text_h = reaper.ImGui_GetTextLineHeight(ctx)
+                        local date_text_y = name_center_y - math.floor(meta_text_h * 0.5)
                         if open_row_dates then
                             local open_text = fit_text_to_width(ctx, "Currently Open", avail_for_dates)
                             local open_w = select(1, reaper.ImGui_CalcTextSize(ctx, open_text)) or 0
@@ -3202,12 +3180,12 @@ function UI.draw(app_state)
                             end
                             local total_w = open_w + ((mod_text and mod_w > 0) and (gap_w + mod_w) or 0)
                             local start_x = math.floor((right_limit - total_w) + 0.5)
-                            reaper.ImGui_DrawList_AddText(dl, start_x, name_text_y, COLOR_ACCENT_DARK, open_text)
+                            reaper.ImGui_DrawList_AddText(dl, start_x, date_text_y, COLOR_ACCENT_DARK, open_text)
                             if mod_text and mod_w > 0 then
-                                reaper.ImGui_DrawList_AddText(dl, start_x + open_w + gap_w, name_text_y, mod_col, mod_text)
+                                reaper.ImGui_DrawList_AddText(dl, start_x + open_w + gap_w, date_text_y, mod_col, mod_text)
                             end
                         else
-                            reaper.ImGui_DrawList_AddText(dl, date_x, name_text_y, COLOR_META_TEXT_SECONDARY, date_text)
+                            reaper.ImGui_DrawList_AddText(dl, date_x, date_text_y, COLOR_META_TEXT_SECONDARY, date_text)
                         end
                         if compact_font_pushed and reaper.ImGui_PopFont then
                             pcall(reaper.ImGui_PopFont, ctx)
@@ -3295,8 +3273,12 @@ function UI.draw(app_state)
                 if active_icon then
                     icon_text = ICON_STOP
                 end
+                local style_inline = nil
+                if is_open_row then
+                    style_inline = { variant = "open_row" }
+                end
                 local inline_play_clicked, is_hovered_inline =
-                    draw_transport_icon_button(ctx, play_id_inline, icon_text, inline_icon_size, is_enabled, active_icon)
+                    draw_transport_icon_button(ctx, play_id_inline, icon_text, inline_icon_size, is_enabled, active_icon, style_inline)
                 if is_hovered_inline then
                     inline_hovered_index = i
                 elseif inline_hovered_index == i then
@@ -3390,23 +3372,30 @@ function UI.draw(app_state)
                         end
                         local draw_pin = false
                         local pin_col = COLOR_META_TEXT_SECONDARY
-                        if is_pinned_row then
-                            draw_pin = true
-                            if is_open_row then
-                                pin_col = COLOR_DARK_30
-                            else
+                        if is_open_row then
+                            if is_pinned_row or row_hovered or is_selected_row then
+                                draw_pin = true
+                                if icon_hovered then
+                                    pin_col = COLOR_TEXT_BLACK
+                                else
+                                    pin_col = color_mul_rgb(COLOR_TEXT_MUTED, 0.35)
+                                end
+                            end
+                        else
+                            if is_pinned_row then
+                                draw_pin = true
                                 if icon_hovered then
                                     pin_col = COLOR_TEXT
                                 else
                                     pin_col = COLOR_META_TEXT_SECONDARY
                                 end
-                            end
-                        elseif row_hovered or is_selected_row then
-                            draw_pin = true
-                            if icon_hovered then
-                                pin_col = COLOR_TEXT
-                            else
-                                pin_col = COLOR_META_TEXT_SECONDARY
+                            elseif row_hovered or is_selected_row then
+                                draw_pin = true
+                                if icon_hovered then
+                                    pin_col = COLOR_TEXT
+                                else
+                                    pin_col = COLOR_META_TEXT_SECONDARY
+                                end
                             end
                         end
                         local pin_clicked = icon_hovered and reaper.ImGui_IsMouseClicked and reaper.ImGui_IsMouseClicked(ctx, 0)
@@ -4544,20 +4533,20 @@ function UI.draw(app_state)
             end
 
             do
-                app_state.settings = app_state.settings or {}
-                local keep = app_state.settings.keep_player_open == true
-                if font and ICON_PIN and reaper.ImGui_PushFont and reaper.ImGui_GetMousePos then
+                if font and ICON_CLOSE and reaper.ImGui_PushFont and reaper.ImGui_GetMousePos then
                     local pin_font_pushed = false
                     local ok_pin = pcall(reaper.ImGui_PushFont, ctx, font, font_size + 4.0)
                     if ok_pin then
                         pin_font_pushed = true
-                        local pin_mark = ICON_PIN
-                        if not keep and ICON_PIN_HOVER then
-                            pin_mark = ICON_PIN_HOVER
-                        end
-                        local tw, th = reaper.ImGui_CalcTextSize(ctx, pin_mark)
+                        local icon_mark = ICON_CLOSE
+                        local tw, th = reaper.ImGui_CalcTextSize(ctx, icon_mark)
                         local right_pad = 10
-                        local px = content_x + content_w - right_pad - tw
+                        local px
+                        if pin_column_center_x ~= nil then
+                            px = pin_column_center_x - math.floor(tw * 0.5)
+                        else
+                            px = content_x + content_w - right_pad - tw
+                        end
                         local py = content_y + controls_offset_y + math.floor((play_size - th) / 2)
                         local mx, my = reaper.ImGui_GetMousePos(ctx)
                         local hovered = false
@@ -4566,41 +4555,25 @@ function UI.draw(app_state)
                                 hovered = true
                             end
                         end
-                        if keep then
-                            if hovered and ICON_PIN_HOVER then
-                                pin_mark = ICON_PIN_HOVER
-                                tw, th = reaper.ImGui_CalcTextSize(ctx, pin_mark)
+                        if hovered and ICON_CLOSE_HOVER then
+                            icon_mark = ICON_CLOSE_HOVER
+                            tw, th = reaper.ImGui_CalcTextSize(ctx, icon_mark)
+                            if pin_column_center_x ~= nil then
+                                px = pin_column_center_x - math.floor(tw * 0.5)
+                            else
+                                px = content_x + content_w - right_pad - tw
                             end
-                        else
-                            if hovered and ICON_PIN then
-                                pin_mark = ICON_PIN
-                                tw, th = reaper.ImGui_CalcTextSize(ctx, pin_mark)
-                            end
+                            py = content_y + controls_offset_y + math.floor((play_size - th) / 2)
                         end
-                        if pin_column_center_x ~= nil then
-                            px = pin_column_center_x - math.floor(tw * 0.5)
-                        else
-                            px = content_x + content_w - right_pad - tw
-                        end
-                        py = content_y + controls_offset_y + math.floor((play_size - th) / 2)
-                        local pin_col = COLOR_META_TEXT_SECONDARY
+                        local icon_col = COLOR_META_TEXT_SECONDARY
                         if hovered then
-                            pin_col = COLOR_TEXT
+                            icon_col = COLOR_TEXT
                         end
-                        reaper.ImGui_DrawList_AddText(draw_list_ctrl or reaper.ImGui_GetWindowDrawList(ctx), px, py, pin_col, pin_mark)
+                        reaper.ImGui_DrawList_AddText(draw_list_ctrl or reaper.ImGui_GetWindowDrawList(ctx), px, py, icon_col, icon_mark)
                         local clicked = hovered and reaper.ImGui_IsMouseClicked and reaper.ImGui_IsMouseClicked(ctx, 0)
                         if clicked then
-                            local settings = app_state.settings
-                            local new_keep = not keep
-                            settings.keep_player_open = new_keep
-                            if app_state.save_settings then
-                                app_state.save_settings(settings)
-                            end
-                        end
-                        if hovered then
-                            show_delayed_tooltip("bottom_keep_player_open", "Keep Player Open", true)
-                        else
-                            show_delayed_tooltip("bottom_keep_player_open", nil, false)
+                            bottom_player_closed = true
+                            bottom_panel_target_h = 0
                         end
                     end
                     if pin_font_pushed and reaper.ImGui_PopFont then
@@ -4760,7 +4733,6 @@ function UI.draw(app_state)
             end
             reaper.ImGui_Dummy(ctx, 1, meta_pad_y)
             reaper.ImGui_SetCursorScreenPos(ctx, saved_x, saved_y)
-            show_bottom_player_context_menu(app_state)
             reaper.ImGui_EndChild(ctx)
             end
             end
@@ -4768,7 +4740,7 @@ function UI.draw(app_state)
 
         do
             local footer_text = "by Mr. Frenkie"
-            local version_text = "1.0"
+            local version_text = "1.0.1"
             local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
             local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
             local tw, th = reaper.ImGui_CalcTextSize(ctx, footer_text)
@@ -4850,8 +4822,6 @@ function UI.draw(app_state)
         else
             footer_popup_visible = false
         end
-
-        show_window_context_menu(app_state)
 
         if app_state.request_close and not app_state.pin_on_screen then
             open = false
