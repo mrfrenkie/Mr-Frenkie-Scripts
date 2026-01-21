@@ -1290,9 +1290,35 @@ local function run_main_command_in_project(command_id, project)
     reaper.Main_OnCommand(command_id, 0)
 end
 
+local IMPORT_EXT_SECTION = "FrenkieRecentProjects"
+local IMPORT_EXT_KEY_DONE = "reaper_ini_import_done_v1"
+local PREVIEW_HINT_KEY = "preview_hint_shown_count_v1"
+
+local function maybe_show_preview_hint()
+    if not reaper.GetExtState or not reaper.SetExtState or not reaper.ShowMessageBox then
+        return
+    end
+    local raw = tostring(reaper.GetExtState(IMPORT_EXT_SECTION, PREVIEW_HINT_KEY) or "")
+    local count = tonumber(raw) or 0
+    if count >= 2 then
+        return
+    end
+    local idx = count + 1
+    local title = "Frenkie Recent Projects - Preview tips"
+    local line1 = "1. For best results, set the '=START' and '=END' arrange markers before creating a dedicated track range.\n\n"
+    local line2 = "2. REAPER may regularly show a prompt asking to automatically render a new preview (subproject).\n" ..
+        "   You can disable this by right-clicking the project tab and choosing:\n" ..
+        "   Subproject rendering > Do not automatically render subprojects (require manual render).\n\n"
+    local footer = string.format("This message will be shown twice (%d/2).", idx)
+    local msg = line1 .. line2 .. footer
+    reaper.ShowMessageBox(msg, title, 0)
+    reaper.SetExtState(IMPORT_EXT_SECTION, PREVIEW_HINT_KEY, tostring(idx), true)
+end
+
 function ProjectList.create_preview(project_path)
     if not project_path or project_path == "" then return false end
     if not reaper.file_exists(project_path) then return false end
+    maybe_show_preview_hint()
     local CMD_NEW_PROJECT_TAB = 40859
     local CMD_SAVE_AND_RENDER_RPP_PROX = 42332
 
@@ -2219,6 +2245,141 @@ local function save_history_records(records)
 end
 
 
+local function get_reaper_ini_path()
+    if reaper.get_ini_file then
+        local ok, path = pcall(reaper.get_ini_file)
+        if ok and type(path) == "string" and path ~= "" then
+            return path
+        end
+    end
+    if reaper.GetResourcePath then
+        local base = reaper.GetResourcePath()
+        if base and base ~= "" then
+            return tostring(base) .. "/reaper.ini"
+        end
+    end
+    return nil
+end
+
+local function read_reaper_ini_recent_paths()
+    if not reaper.BR_Win32_GetPrivateProfileString then
+        return {}
+    end
+    local ini_path = get_reaper_ini_path()
+    if not ini_path or ini_path == "" then
+        return {}
+    end
+    local paths = {}
+    local max_recent = 100
+    for i = 1, max_recent do
+        local key = string.format("recent%02d", i)
+        local _, full_path = reaper.BR_Win32_GetPrivateProfileString("recent", key, "", ini_path)
+        full_path = tostring(full_path or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if full_path ~= "" and looks_like_project_path(full_path) then
+            paths[#paths + 1] = full_path
+        end
+    end
+    return paths
+end
+
+local function import_reaper_ini_recent_to_history()
+    local ini_paths = read_reaper_ini_recent_paths()
+    if #ini_paths == 0 then
+        return false, "no recent projects found"
+    end
+    local records = read_history_records()
+    local existing_by_norm = {}
+    for i = 1, #records do
+        local rec = records[i]
+        local n = normalize_history_path(rec and rec.path)
+        if n ~= "" and not existing_by_norm[n] then
+            existing_by_norm[n] = i
+        end
+    end
+    local seen_new = {}
+    local now = os.time()
+    for idx = 1, #ini_paths do
+        local p = tostring(ini_paths[idx] or "")
+        local n = normalize_history_path(p)
+        if p ~= "" and n ~= "" and not existing_by_norm[n] and not seen_new[n] then
+            seen_new[n] = true
+            local name = p:match("([^/\\]+)%.rpp$") or p:match("([^/\\]+)$") or p
+            local last_opened = nil
+            if reaper.file_exists and reaper.file_exists(p) then
+                local at = get_file_atime_epoch(p)
+                if at and tonumber(at) and tonumber(at) > 0 then
+                    last_opened = math.floor(tonumber(at))
+                else
+                    local mt = get_file_mtime_epoch(p)
+                    if mt and tonumber(mt) and tonumber(mt) > 0 then
+                        last_opened = math.floor(tonumber(mt))
+                    end
+                end
+            end
+            if not last_opened then
+                last_opened = now - (idx - 1)
+            end
+            records[#records + 1] = {
+                path = p,
+                norm = n,
+                name = name,
+                last_opened = last_opened,
+                open_count = 0
+            }
+        end
+    end
+    if #records == 0 then
+        return true, "nothing to import"
+    end
+    local ok = save_history_records(records)
+    if not ok then
+        return false, "failed to save history"
+    end
+    return true, nil
+end
+
+function ProjectList.ensure_reaper_ini_import()
+    if not reaper.GetExtState or not reaper.SetExtState then
+        return
+    end
+    local done = tostring(reaper.GetExtState(IMPORT_EXT_SECTION, IMPORT_EXT_KEY_DONE) or "")
+    if done ~= "" then
+        return
+    end
+    local msg = "All your projects will be imported into the list. Further history will be managed by the widget.\n\nDo you want to import recent projects from REAPER now?"
+    local title = "Frenkie Recent Projects"
+    local ret = 6
+    if reaper.ShowMessageBox then
+        ret = reaper.ShowMessageBox(msg, title, 4)
+    end
+    if ret ~= 6 then
+        reaper.SetExtState(IMPORT_EXT_SECTION, IMPORT_EXT_KEY_DONE, "1", true)
+        return
+    end
+    local ok, err = import_reaper_ini_recent_to_history()
+    reaper.SetExtState(IMPORT_EXT_SECTION, IMPORT_EXT_KEY_DONE, "1", true)
+    if not ok and err and err ~= "" and reaper.ShowMessageBox then
+        reaper.ShowMessageBox("Import from reaper.ini failed:\n" .. tostring(err), title, 0)
+    end
+end
+
+function ProjectList.reset_hint_state()
+    if not reaper.DeleteExtState then
+        return false
+    end
+    local deleted_any = false
+    if reaper.HasExtState and reaper.HasExtState(IMPORT_EXT_SECTION, IMPORT_EXT_KEY_DONE) then
+        reaper.DeleteExtState(IMPORT_EXT_SECTION, IMPORT_EXT_KEY_DONE, true)
+        deleted_any = true
+    end
+    if reaper.HasExtState and reaper.HasExtState(IMPORT_EXT_SECTION, PREVIEW_HINT_KEY) then
+        reaper.DeleteExtState(IMPORT_EXT_SECTION, PREVIEW_HINT_KEY, true)
+        deleted_any = true
+    end
+    return deleted_any
+end
+
+
 local function read_recent_projects_from_extstate_history()
     local projects = {}
     local records = read_history_records()
@@ -2744,26 +2905,44 @@ function ProjectList.close_project(project_path)
     return true
 end
 
--- Show project in Finder
-function ProjectList.show_in_finder(project_path)
-    if reaper.file_exists(project_path) then
-        -- Use CF_LocateInExplorer to reveal and highlight the file in Finder
-        if reaper.CF_LocateInExplorer then
-            reaper.CF_LocateInExplorer(project_path)
-        elseif reaper.CF_ShellExecute then
-            -- Fallback: just open the folder
-            local folder = project_path:match("(.+)[/\\][^/\\]+$")
-            if folder then
-                reaper.CF_ShellExecute(folder)
-            end
+-- Show project in system file manager
+function ProjectList.show_in_file_manager(project_path)
+    local path = tostring(project_path or "")
+    if path == "" then return end
+
+    local os_name = reaper.GetOS and tostring(reaper.GetOS()) or ""
+    local is_mac = os_name:match("OSX") ~= nil or os_name:lower():match("mac") ~= nil
+    local is_win = os_name:match("Win") ~= nil
+
+    local target = path
+    if not reaper.file_exists(path) then
+        local folder = path:match("(.+)[/\\][^/\\]+$")
+        if folder and folder ~= "" then
+            target = folder
+        end
+    end
+
+    if is_mac then
+        if reaper.CF_LocateInExplorer and reaper.file_exists(path) then
+            reaper.CF_LocateInExplorer(path)
+            return
+        end
+        if reaper.CF_ShellExecute then
+            reaper.CF_ShellExecute(target)
+        end
+    elseif is_win then
+        if reaper.CF_LocateInExplorer and reaper.file_exists(path) then
+            reaper.CF_LocateInExplorer(path)
+            return
+        end
+        if reaper.CF_ShellExecute then
+            reaper.CF_ShellExecute(target)
         end
     else
-        -- Fallback: open folder if file doesn't exist
         if reaper.CF_ShellExecute then
-            local folder = project_path:match("(.+)[/\\][^/\\]+$")
-            if folder then
-                reaper.CF_ShellExecute(folder)
-            end
+            reaper.CF_ShellExecute(target)
+        elseif reaper.OpenURL then
+            reaper.OpenURL(target)
         end
     end
 end

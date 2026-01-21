@@ -1,6 +1,6 @@
 -- Frenkie Recent Projects - Main Entry Point
 -- Author: Mr. Frenkie / ChatGPT
--- Description: Recent Projects Manager v.1.0.1
+-- Description: Recent Projects Manager v.1.1
 ---@diagnostic disable: undefined-global -- reaper is provided by REAPER at runtime
 
 -- Check for ReaImGUI
@@ -356,6 +356,9 @@ local app_state = {
 
 -- Initialize modules
 ProjectList.init()
+if ProjectList.ensure_reaper_ini_import then
+    ProjectList.ensure_reaper_ini_import()
+end
 if ProjectList.set_preview_volume then
     ProjectList.set_preview_volume(app_state.preview_volume)
 end

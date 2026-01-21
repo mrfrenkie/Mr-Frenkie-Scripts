@@ -176,10 +176,8 @@ local format_time_mmss = nil
 local projects_scroll_target_y = nil
 local projects_scroll_last_t = nil
 local projects_scroll_restore_done = false
-local bottom_tail_full_h = 0
 local play_column_center_x = nil
 local pin_column_center_x = nil
-local bottom_tail_anchor_y = nil
 local bottom_splitter_active = false
 local bottom_splitter_start_mouse_y = 0
 local bottom_splitter_start_h = 0
@@ -192,6 +190,12 @@ local function clamp01(x)
     if x < 0 then return 0 end
     if x > 1 then return 1 end
     return x
+end
+
+local function normalize_path(path)
+    local s = tostring(path or "")
+    if s == "" then return "" end
+    return (s:gsub("\\", "/")):lower()
 end
 
 local function color_set_alpha(color, alpha)
@@ -218,6 +222,24 @@ local meta_panel_h_current = 0
 local meta_panel_target_h = 0
 local meta_panel_last_t = nil
 local meta_panel_pending_path = nil
+local PATH_MIN_WINDOW_W = 700
+local PATH_SCROLL_SPEED = 40
+local PATH_SCROLL_GAP = 40
+local PATH_RIGHT_ICON_RESERVE = 40
+
+local function get_history_file_path_from_ui()
+    local src = debug.getinfo(1, "S")
+    local script_path = src and src.source and src.source:match("@(.+)") or ""
+    local dir = script_path:match("(.+)[/\\][^/\\]+$") or ""
+    if dir == "" then
+        return "My Resent Projects List.txt"
+    end
+    local parent_dir = dir:match("(.+)[/\\][^/\\]+$") or dir
+    if parent_dir == "" then
+        return "My Resent Projects List.txt"
+    end
+    return parent_dir .. "/My Resent Projects List.txt"
+end
 
 local function apply_smooth_scroll(ctx, wheel_delta, scroll_step, target_y, last_t, speed)
     local now = reaper.time_precise()
@@ -404,12 +426,25 @@ local function draw_custom_close_button(imgui_ctx)
                 local h = y2 - y1
                 local cx = x1 + math.floor(w * 0.5)
                 local cy = y1 + math.floor(h * 0.5)
-                local mark = "×"
+                local mark = ICON_CLOSE or "×"
+                if hovered and ICON_CLOSE_HOVER then
+                    mark = ICON_CLOSE_HOVER
+                end
+                local font_pushed = false
+                if font and reaper.ImGui_PushFont then
+                    local ok_font = pcall(reaper.ImGui_PushFont, imgui_ctx, font, font_size + 4.0)
+                    if ok_font then
+                        font_pushed = true
+                    end
+                end
                 local tw, th = reaper.ImGui_CalcTextSize(imgui_ctx, mark)
                 local tx = cx - math.floor(tw * 0.5)
                 local ty = cy - math.floor(th * 0.5)
                 local col = hovered and COLOR_TEXT or COLOR_TEXT_MUTED
                 reaper.ImGui_DrawList_AddText(draw_list, tx, ty, col, mark)
+                if font_pushed and reaper.ImGui_PopFont then
+                    pcall(reaper.ImGui_PopFont, imgui_ctx)
+                end
             end
         end
     else
@@ -754,13 +789,77 @@ local function draw_compact_view_toggle(ctx, app_state)
     show_delayed_tooltip("compact_view_toggle", "Compact List")
 
     if clicked then
-        settings.compact_view = not compact_view
-        if app_state.save_settings then
-            app_state.save_settings(settings)
+        local keymods = reaper.ImGui_GetKeyMods and reaper.ImGui_GetKeyMods(ctx) or 0
+        local super_mod = reaper.ImGui_Mod_Super and reaper.ImGui_Mod_Super() or 0
+        local ctrl_mod = reaper.ImGui_Mod_Ctrl and reaper.ImGui_Mod_Ctrl() or 0
+        local alt_mod = reaper.ImGui_Mod_Alt and reaper.ImGui_Mod_Alt() or 0
+        local cmd_down = false
+        if ctrl_mod ~= 0 then
+            cmd_down = (keymods & ctrl_mod) ~= 0
+        elseif super_mod ~= 0 then
+            cmd_down = (keymods & super_mod) ~= 0
+        end
+        local alt_down = (alt_mod ~= 0) and ((keymods & alt_mod) ~= 0) or false
+
+        if alt_down and ProjectList and ProjectList.show_in_file_manager then
+            local history_path = get_history_file_path_from_ui()
+            ProjectList.show_in_file_manager(history_path)
+        elseif cmd_down then
+            local any_reset = false
+            if ProjectList and ProjectList.reset_hint_state then
+                local ok_reset = ProjectList.reset_hint_state()
+                if ok_reset then
+                    any_reset = true
+                end
+            end
+            if reaper.DeleteExtState and reaper.HasExtState then
+                local section = "FrenkieRecentProjects"
+                local key = "observer_hint_shown_v1"
+                if reaper.HasExtState(section, key) then
+                    reaper.DeleteExtState(section, key, true)
+                    any_reset = true
+                end
+            end
+            if any_reset and reaper.ShowMessageBox then
+                reaper.ShowMessageBox("Hints have been reset. They will be shown again.", "Frenkie Recent Projects", 0)
+            end
+        else
+            settings.compact_view = not compact_view
+            if app_state.save_settings then
+                app_state.save_settings(settings)
+            end
         end
     end
 
     return clicked
+end
+
+local function draw_projects_counter(ctx, app_state, row_x, row_y, right_x, btn_size)
+    local projects = app_state and app_state.filtered_projects
+    if not projects then
+        return
+    end
+    local count = #projects
+    if count <= 0 then
+        return
+    end
+    local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+    if not draw_list then
+        return
+    end
+    local text = string.format("Projects: %d", count)
+    local tw, th = reaper.ImGui_CalcTextSize(ctx, text)
+    if not tw or not th then
+        return
+    end
+    local gap = 8
+    local tx2 = right_x - gap
+    local tx = tx2 - tw
+    if tx < row_x then
+        tx = row_x
+    end
+    local ty = row_y + math.floor((btn_size - th) * 0.5)
+    reaper.ImGui_DrawList_AddText(draw_list, tx, ty, COLOR_FOOTER_TEXT_MUTED, text)
 end
 
 local function draw_project_meta_panel(imgui_ctx, draw_list, x1, y1, x2, y2, meta, project)
@@ -909,7 +1008,14 @@ local function draw_project_meta_panel(imgui_ctx, draw_list, x1, y1, x2, y2, met
         end
 
         if tl_w > 10 and tl_h > 6 and draw_player_timeline and regions and timeline_span and timeline_span > 0 then
-            draw_player_timeline(imgui_ctx, draw_list, "##meta_regions", tl_x, tl_y, tl_w, tl_h, {
+            local tl_id = "##meta_regions"
+            if project then
+                local p = project.full_path or project.path or ""
+                if p ~= "" then
+                    tl_id = tl_id .. "_" .. normalize_path(p)
+                end
+            end
+            draw_player_timeline(imgui_ctx, draw_list, tl_id, tl_x, tl_y, tl_w, tl_h, {
                 is_enabled = true,
                 preview_path = nil,
                 regions = regions,
@@ -926,9 +1032,16 @@ local function draw_project_meta_panel(imgui_ctx, draw_list, x1, y1, x2, y2, met
         local panel_w = math.max(0, x2 - x1)
         local panel_h = math.max(0, y2 - y1)
         if panel_w > 0 and panel_h > 0 and reaper.ImGui_InvisibleButton and reaper.ImGui_BeginPopupContextItem then
+            local ctx_id = "##meta_panel_ctx"
+            if project then
+                local p = project.full_path or project.path or ""
+                if p ~= "" then
+                    ctx_id = ctx_id .. "_" .. normalize_path(p)
+                end
+            end
             reaper.ImGui_SetCursorScreenPos(imgui_ctx, x1, y1)
-            reaper.ImGui_InvisibleButton(imgui_ctx, "##meta_panel_ctx", panel_w, panel_h)
-            if reaper.ImGui_BeginPopupContextItem(imgui_ctx, "##meta_panel_ctx") then
+            reaper.ImGui_InvisibleButton(imgui_ctx, ctx_id, panel_w, panel_h)
+            if reaper.ImGui_BeginPopupContextItem(imgui_ctx, ctx_id) then
                 if reaper.ImGui_MenuItem(imgui_ctx, "Copy Metadata") then
                     local text = build_copy_text()
                     if text ~= "" and reaper.ImGui_SetClipboardText then
@@ -1015,12 +1128,6 @@ local function region_label_color_for_native(native_color, default_u32)
     if not r or not g or not b then return default_u32 end
     if should_use_black_text(r, g, b) then return COLOR_TEXT_BLACK end
     return COLOR_TEXT_INVERTED
-end
-
-local function normalize_path(path)
-    local s = tostring(path or "")
-    if s == "" then return "" end
-    return (s:gsub("\\", "/")):lower()
 end
 
 local function regroup_filtered_projects(app_state)
@@ -1993,29 +2100,30 @@ local function safe_get_preview_meta(ProjectList, project, preview_path)
     return meta
 end
 
+local function is_project_meta_open(app_state, project)
+    if not app_state or not project then return false end
+    local p = project and (project.full_path or project.path) or ""
+    if p == "" then return false end
+    local key = normalize_path(p)
+    if key == "" then return false end
+    app_state.open_meta_paths = app_state.open_meta_paths or {}
+    return app_state.open_meta_paths[key] == true
+end
+
 local function toggle_project_metadata(app_state, project)
-    if not project then return end
+    if not project or not app_state then return end
     local p = project and (project.full_path or project.path) or ""
     if p == "" then return end
 
-    local normalized_p = normalize_path(p)
-    local current_path = app_state and app_state.project_meta_path or nil
-    local normalized_current = (current_path and current_path ~= "") and normalize_path(current_path) or ""
+    local key = normalize_path(p)
+    if key == "" then return end
 
-    local is_meta_open = false
-    if app_state and app_state.project_meta_path then
-        local opened = normalize_path(app_state.project_meta_path)
-        if normalized_p ~= "" and opened ~= "" and normalized_p == opened and project.parsed_meta then
-            is_meta_open = true
-        end
-    end
+    app_state.open_meta_paths = app_state.open_meta_paths or {}
 
-    if is_meta_open then
-        meta_panel_pending_path = false
+    if app_state.open_meta_paths[key] and project.parsed_meta then
+        app_state.open_meta_paths[key] = nil
         return
     end
-
-    local switching_from_other = (normalized_current ~= "" and normalized_p ~= "" and normalized_current ~= normalized_p)
 
     local meta = nil
     if ProjectList and ProjectList.get_project_metadata then
@@ -2027,14 +2135,7 @@ local function toggle_project_metadata(app_state, project)
 
     if meta then
         project.parsed_meta = meta
-        if switching_from_other then
-            meta_panel_pending_path = p
-        else
-            if app_state then
-                app_state.project_meta_path = p
-            end
-            meta_panel_pending_path = nil
-        end
+        app_state.open_meta_paths[key] = true
     end
 end
 
@@ -2257,14 +2358,7 @@ local function show_context_menu(app_state, project)
     end
     local is_pinned = (ProjectList and ProjectList.is_project_pinned) and ProjectList.is_project_pinned(settings, project_path) or false
 
-    local is_meta_open = false
-    if app_state and app_state.project_meta_path and project_path ~= "" then
-        local cur = normalize_path(project_path)
-        local opened = normalize_path(app_state.project_meta_path)
-        if cur ~= "" and opened ~= "" and cur == opened and project and project.parsed_meta then
-            is_meta_open = true
-        end
-    end
+    local is_meta_open = is_project_meta_open(app_state, project)
     local is_open_or_current = project and (project.is_current or project.is_open)
 
     draw_menu_from_table(ctx, {
@@ -2298,9 +2392,18 @@ local function show_context_menu(app_state, project)
         },
         { separator = true },
         {
-            label = "Show in Finder",
+            label = (function()
+                local os = reaper.GetOS and tostring(reaper.GetOS()) or ""
+                if os:match("OSX") or os:lower():match("mac") then
+                    return "Show in Finder"
+                elseif os:match("Win") then
+                    return "Show in Explorer"
+                else
+                    return "Show in File Manager"
+                end
+            end)(),
             action = function(env)
-                ProjectList.show_in_finder(env.project.full_path)
+                ProjectList.show_in_file_manager(env.project.full_path)
             end
         },
         {
@@ -2485,6 +2588,9 @@ function UI.draw(app_state)
         if tight_x < row_x then
             tight_x = row_x
         end
+
+        draw_projects_counter(ctx, app_state, row_x, row_y, tight_x, btn_size)
+
         local pos_x, pos_y = reaper.ImGui_GetCursorPos(ctx)
         reaper.ImGui_SetCursorScreenPos(ctx, tight_x, row_y)
         draw_compact_view_toggle(ctx, app_state)
@@ -3373,7 +3479,7 @@ function UI.draw(app_state)
                         local draw_pin = false
                         local pin_col = COLOR_META_TEXT_SECONDARY
                         if is_open_row then
-                            if is_pinned_row or row_hovered or is_selected_row then
+                            if is_pinned_row or row_hovered then
                                 draw_pin = true
                                 if icon_hovered then
                                     pin_col = COLOR_TEXT_BLACK
@@ -3389,7 +3495,7 @@ function UI.draw(app_state)
                                 else
                                     pin_col = COLOR_META_TEXT_SECONDARY
                                 end
-                            elseif row_hovered or is_selected_row then
+                            elseif row_hovered then
                                 draw_pin = true
                                 if icon_hovered then
                                     pin_col = COLOR_TEXT
@@ -3417,32 +3523,39 @@ function UI.draw(app_state)
                                 regroup_filtered_projects(app_state)
                             end
                         end
-                        if not compact_view and not is_open_row and not (is_selected_row and is_enabled and is_playing_row) then
+                        if row_hovered and not is_open_row then
                             local caret_char = "▾"
                             local caret_open = false
-                            if app_state and app_state.project_meta_path then
-                                local opened = normalize_path(app_state.project_meta_path)
-                                local p = normalize_path(project and (project.full_path or project.path) or "")
-                                if opened ~= "" and p ~= "" and opened == p then
-                                    caret_open = true
-                                end
+                            if is_project_meta_open(app_state, project) then
+                                caret_open = true
                             end
                             if caret_open then
                                 caret_char = "▴"
                             end
                             local caret_font_pushed = false
                             if font and reaper.ImGui_PushFont then
-                                local ok_caret = pcall(reaper.ImGui_PushFont, ctx, font, font_size + 8.0)
+                                local ok_caret = pcall(reaper.ImGui_PushFont, ctx, font, font_size + 12.0)
                                 if ok_caret then
                                     caret_font_pushed = true
                                 end
                             end
                             local cw, ch = reaper.ImGui_CalcTextSize(ctx, caret_char)
-                            local caret_cx = tx + math.floor(tw * 0.5)
-                            if pin_column_center_x ~= nil then
-                                caret_cx = pin_column_center_x
+                            local caret_tx
+                            if compact_view then
+                                local gap_x = 4
+                                if pin_column_center_x ~= nil then
+                                    local pin_left = pin_column_center_x - math.floor(tw * 0.5)
+                                    caret_tx = pin_left - gap_x - cw
+                                else
+                                    caret_tx = tx - gap_x - cw
+                                end
+                            else
+                                local caret_cx = tx + math.floor(tw * 0.5)
+                                if pin_column_center_x ~= nil then
+                                    caret_cx = pin_column_center_x
+                                end
+                                caret_tx = caret_cx - math.floor(cw * 0.5)
                             end
-                            local caret_tx = caret_cx - math.floor(cw * 0.5)
                             local caret_ty = row_bottom_y - ch - 2
                             local hit_x1 = caret_tx - 3
                             local hit_x2 = caret_tx + cw + 3
@@ -3545,7 +3658,11 @@ function UI.draw(app_state)
                     local meta_y = title_top_y + name_block_h + meta_gap_y
                     local bar_x = text_left_x
                     local right_limit = cur_x + avail_w_line - 6
-                    local bar_w = math.max(0, right_limit - bar_x)
+                    local bar_right = right_limit - 40
+                    if bar_right < bar_x then
+                        bar_right = bar_x
+                    end
+                    local bar_w = math.max(0, bar_right - bar_x)
                     local next_y = row_bottom_y
 
                     local modified_text = project.date or ""
@@ -3573,9 +3690,7 @@ function UI.draw(app_state)
                         end
                     end
 
-                    if is_selected_row and is_enabled and is_playing_row then
-                        -- Do not draw dates/size, playback bar will occupy this slot
-                    else
+                    if not (is_selected_row and is_enabled and is_playing_row) then
                         if is_open_row then
                             local is_dirty = false
                             if ProjectList and ProjectList.is_project_dirty then
@@ -3608,10 +3723,95 @@ function UI.draw(app_state)
                             if size_s then
                                 meta_line = meta_line .. "    Size: " .. size_s
                             end
-                            reaper.ImGui_SetCursorScreenPos(ctx, meta_x, meta_y)
-                            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), meta_col)
-                            reaper.ImGui_Text(ctx, meta_line)
-                            reaper.ImGui_PopStyleColor(ctx, 1)
+                            local path_label = ""
+                            if project_path and project_path ~= "" then
+                                local folder = project_path:match("(.+)[/\\][^/\\]+$") or ""
+                                if folder ~= "" then
+                                    local last = folder:sub(-1)
+                                    if last ~= "/" and last ~= "\\" then
+                                        folder = folder .. "/"
+                                    end
+                                end
+                                path_label = folder
+                            end
+                            local win_w = select(1, reaper.ImGui_GetWindowSize(ctx)) or 0
+                            local show_path = path_label ~= "" and win_w >= PATH_MIN_WINDOW_W
+                            if show_path then
+                                local base_line = meta_line
+                                local sep = "    "
+                                local base_text = base_line .. sep
+                                local base_w = select(1, reaper.ImGui_CalcTextSize(ctx, base_text)) or 0
+                                local right_for_path = right_limit - PATH_RIGHT_ICON_RESERVE
+                                if right_for_path < (meta_x + base_w) then
+                                    right_for_path = meta_x + base_w
+                                end
+                                local avail_total = math.max(0, right_for_path - meta_x)
+                                local avail_path = math.max(0, avail_total - base_w)
+
+                                reaper.ImGui_SetCursorScreenPos(ctx, meta_x, meta_y)
+                                reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), meta_col)
+                                reaper.ImGui_Text(ctx, base_text)
+                                reaper.ImGui_PopStyleColor(ctx, 1)
+
+                                if avail_path > 0 then
+                                    local draw_list_meta = reaper.ImGui_GetWindowDrawList(ctx)
+                                    if draw_list_meta then
+                                        local path_w = select(1, reaper.ImGui_CalcTextSize(ctx, path_label)) or 0
+                                        local path_x = meta_x + base_w
+                                        local path_y = meta_y
+                                        local line_h = meta_h_local
+                                        local mx, my = reaper.ImGui_GetMousePos(ctx)
+                                        local hit_x1 = path_x
+                                        local hit_y1 = path_y
+                                        local hit_x2 = path_x + avail_path
+                                        local hit_y2 = path_y + line_h
+                                        local hovered_path = false
+                                        if mx and my then
+                                            if mx >= hit_x1 and mx <= hit_x2 and my >= hit_y1 and my <= hit_y2 then
+                                                hovered_path = true
+                                            end
+                                        end
+                                        local path_col = hovered_path and COLOR_TEXT or meta_col
+
+                                        if path_w <= avail_path then
+                                            if reaper.ImGui_PushClipRect and reaper.ImGui_PopClipRect then
+                                                reaper.ImGui_PushClipRect(ctx, path_x, path_y, path_x + avail_path, path_y + line_h, true)
+                                                reaper.ImGui_DrawList_AddText(draw_list_meta, path_x, path_y, path_col, path_label)
+                                                reaper.ImGui_PopClipRect(ctx)
+                                            else
+                                                reaper.ImGui_DrawList_AddText(draw_list_meta, path_x, path_y, path_col, path_label)
+                                            end
+                                        else
+                                            local now = reaper.time_precise and reaper.time_precise() or os.clock()
+                                            local speed = PATH_SCROLL_SPEED
+                                            local gap = PATH_SCROLL_GAP
+                                            local loop_w = path_w + gap
+                                            local offset = 0
+                                            if loop_w > 0 then
+                                                offset = (now * speed) % loop_w
+                                            end
+                                            local base_x = path_x - offset
+                                            if reaper.ImGui_PushClipRect and reaper.ImGui_PopClipRect then
+                                                reaper.ImGui_PushClipRect(ctx, path_x, path_y, path_x + avail_path, path_y + line_h, true)
+                                                reaper.ImGui_DrawList_AddText(draw_list_meta, base_x, path_y, path_col, path_label)
+                                                reaper.ImGui_DrawList_AddText(draw_list_meta, base_x + loop_w, path_y, path_col, path_label)
+                                                reaper.ImGui_PopClipRect(ctx)
+                                            else
+                                                reaper.ImGui_DrawList_AddText(draw_list_meta, path_x, path_y, path_col, path_label)
+                                            end
+                                        end
+
+                                        if hovered_path and ProjectList and ProjectList.show_in_file_manager and reaper.ImGui_IsMouseClicked and reaper.ImGui_IsMouseClicked(ctx, 0) then
+                                            ProjectList.show_in_file_manager(project_path)
+                                        end
+                                    end
+                                end
+                            else
+                                reaper.ImGui_SetCursorScreenPos(ctx, meta_x, meta_y)
+                                reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), meta_col)
+                                reaper.ImGui_Text(ctx, meta_line)
+                                reaper.ImGui_PopStyleColor(ctx, 1)
+                            end
                         end
                     end
 
@@ -3965,8 +4165,7 @@ function UI.draw(app_state)
         local list_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 0
         if list_w < 0 then list_w = 0 end
         local list_h = math.max(0, table_height - open_h)
-        local list_scroll_y = 0.0
-        local list_scroll_max_y = 0.0
+        local list_scroll = { y = 0.0, max = 0.0 }
 
         local mx, my = nil, nil
         local wheel_v_raw = 0
@@ -3981,151 +4180,85 @@ function UI.draw(app_state)
         end
 
         if list_h > 0 and reaper.ImGui_BeginChild(ctx, "projects_list", 0, list_h, 0, CHILD_LIST_WINDOW_FLAGS) then
-            local count_text = string.format("Projects: %d", app_state.filtered_projects and #app_state.filtered_projects or 0)
             local draw_list_count = reaper.ImGui_GetWindowDrawList(ctx)
             local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
             local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
-            local tw, th = reaper.ImGui_CalcTextSize(ctx, count_text)
-            local pad_x = 10
-            local pad_y = 6
-            if win_x and win_y and win_w and win_h and tw and th then
-                local tx = (win_x + win_w) - tw - pad_x
-                local ty = (win_y + win_h) - th - pad_y
-                reaper.ImGui_DrawList_AddText(draw_list_count, tx, ty, COLOR_FOOTER_TEXT_MUTED, count_text)
-            end
-
-            local meta_project = nil
-            if app_state and app_state.project_meta_path and app_state.filtered_projects then
-                local needle = normalize_path(app_state.project_meta_path)
-                if needle and needle ~= "" then
-                    for _, pr in ipairs(app_state.filtered_projects) do
-                        local path = pr and (pr.full_path or pr.path) or ""
-                        if path ~= "" and normalize_path(path) == needle and pr.parsed_meta then
-                            meta_project = pr
-                            break
-                        end
-                    end
+            local function compute_meta_panel_height(meta)
+                if not meta or not wrap_text_to_width then
+                    return 0
                 end
-            end
-
-            local meta_has_data = meta_project ~= nil
-            local meta_base_h = 0
-            if meta_has_data then
                 local line_h_meta = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
                 local pad_y_meta = 10
                 local gap_meta_timeline = math.floor(line_h_meta * 0.15)
                 local timeline_h_meta = math.floor(line_h_meta * 1.8)
                 local rows = 4
-                local meta = meta_project and meta_project.parsed_meta or nil
-                if meta and wrap_text_to_width then
-                    local pad_x_meta = 12
-                    local col_gap_meta = 40
-                    local panel_w_meta = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 0
-                    local content_w_meta = math.max(0, panel_w_meta - pad_x_meta * 2)
-                    local col_w_meta = math.floor((content_w_meta - col_gap_meta) * 0.5)
-                    if col_w_meta < 20 then col_w_meta = 20 end
-                    local function val_or_empty_meta(v)
-                        if v == nil or v == "" then
-                            return "Empty"
-                        end
-                        return tostring(v)
+                local pad_x_meta = 12
+                local col_gap_meta = 40
+                local panel_w_meta = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 0
+                local content_w_meta = math.max(0, panel_w_meta - pad_x_meta * 2)
+                local col_w_meta = math.floor((content_w_meta - col_gap_meta) * 0.5)
+                if col_w_meta < 20 then col_w_meta = 20 end
+                local function val_or_empty_meta(v)
+                    if v == nil or v == "" then
+                        return "Empty"
                     end
-                    local function count_lines(label, value)
-                        local label_text = label .. ":"
-                        local label_w = select(1, reaper.ImGui_CalcTextSize(ctx, label_text)) or 0
-                        local max_value_w = col_w_meta - (label_w + 8)
-                        if max_value_w <= 0 then
-                            return 1
-                        end
-                        local text = val_or_empty_meta(value)
-                        local lines = wrap_text_to_width(ctx, text, max_value_w)
-                        return #lines > 0 and #lines or 1
-                    end
-                    local left_rows = 0
-                    left_rows = left_rows + count_lines("Project Title", meta.notes_title)
-                    left_rows = left_rows + count_lines("Project Author", meta.notes_author)
-                    left_rows = left_rows + count_lines("Video Track", (meta.has_video ~= nil) and (meta.has_video and "Yes" or "No") or nil)
-                    left_rows = left_rows + count_lines("Project Notes", meta.notes_body)
-                    local song_len_meta = nil
-                    if meta.song_length_sec and meta.song_length_sec > 0 then
-                        local s = math.floor(meta.song_length_sec + 0.5)
-                        local m = math.floor(s / 60)
-                        local r = s % 60
-                        song_len_meta = string.format("%d:%02d", m, r)
-                    end
-                    local timebase_str_meta = nil
-                    if meta.timebase_mode ~= nil then
-                        local tb = tonumber(meta.timebase_mode) or 0
-                        if tb == 0 then
-                            timebase_str_meta = "Time"
-                        elseif tb == 1 then
-                            timebase_str_meta = "Beats (position, length, rate)"
-                        elseif tb == 2 then
-                            timebase_str_meta = "Beats (position only)"
-                        else
-                            timebase_str_meta = tostring(tb)
-                        end
-                    end
-                    local bpm_str_meta = nil
-                    if meta.bpm and meta.bpm > 0 then
-                        bpm_str_meta = string.format("%.2f", meta.bpm)
-                    end
-                    local tracks_str_meta = nil
-                    if meta.tracks_count and meta.tracks_count > 0 then
-                        tracks_str_meta = tostring(meta.tracks_count)
-                    end
-                    local right_rows = 0
-                    right_rows = right_rows + count_lines("Song Length", song_len_meta)
-                    right_rows = right_rows + count_lines("Timebase", timebase_str_meta)
-                    right_rows = right_rows + count_lines("BPM", bpm_str_meta)
-                    right_rows = right_rows + count_lines("Tracks count", tracks_str_meta)
-                    local est_rows = math.max(left_rows, right_rows)
-                    if est_rows > 0 then
-                        rows = est_rows
-                    end
+                    return tostring(v)
                 end
-                meta_base_h = pad_y_meta + (rows * line_h_meta) + gap_meta_timeline + timeline_h_meta + pad_y_meta
-            end
-
-            local now_meta = reaper.time_precise()
-            local dt_meta = now_meta - (meta_panel_last_t or now_meta)
-            meta_panel_last_t = now_meta
-            if dt_meta < 0 then dt_meta = 0 end
-            if dt_meta > 0.05 then dt_meta = 0.05 end
-
-            local closing_for_switch = (meta_panel_pending_path ~= nil) and (app_state and app_state.project_meta_path ~= nil)
-            if closing_for_switch then
-                meta_panel_target_h = 0
-            elseif meta_has_data then
-                meta_panel_target_h = meta_base_h
-            else
-                meta_panel_target_h = 0
-            end
-            meta_panel_h_current = meta_panel_h_current or 0
-            local speed_meta = 24.0
-            local alpha_meta = 1.0 - math.exp(-(dt_meta or 0) * speed_meta)
-            if alpha_meta < 0 then alpha_meta = 0 end
-            if alpha_meta > 1 then alpha_meta = 1 end
-            local ease_meta = alpha_meta * alpha_meta * alpha_meta * (alpha_meta * (alpha_meta * 6.0 - 15.0) + 10.0)
-            meta_panel_h_current = meta_panel_h_current + (meta_panel_target_h - meta_panel_h_current) * ease_meta
-            if math.abs(meta_panel_target_h - meta_panel_h_current) < 0.5 then
-                meta_panel_h_current = meta_panel_target_h
-            end
-
-            if closing_for_switch and meta_panel_pending_path ~= nil and app_state and app_state.project_meta_path ~= nil then
-                if meta_panel_h_current <= 0.5 then
-                    if meta_panel_pending_path == false then
-                        app_state.project_meta_path = nil
-                        meta_panel_pending_path = nil
-                        meta_panel_last_t = now_meta
+                local function count_lines(label, value)
+                    local label_text = label .. ":"
+                    local label_w = select(1, reaper.ImGui_CalcTextSize(ctx, label_text)) or 0
+                    local max_value_w = col_w_meta - (label_w + 8)
+                    if max_value_w <= 0 then
+                        return 1
+                    end
+                    local text = val_or_empty_meta(value)
+                    local lines = wrap_text_to_width(ctx, text, max_value_w)
+                    return #lines > 0 and #lines or 1
+                end
+                local left_rows = 0
+                left_rows = left_rows + count_lines("Project Title", meta.notes_title)
+                left_rows = left_rows + count_lines("Project Author", meta.notes_author)
+                left_rows = left_rows + count_lines("Video Track", (meta.has_video ~= nil) and (meta.has_video and "Yes" or "No") or nil)
+                left_rows = left_rows + count_lines("Project Notes", meta.notes_body)
+                local song_len_meta = nil
+                if meta.song_length_sec and meta.song_length_sec > 0 then
+                    local s = math.floor(meta.song_length_sec + 0.5)
+                    local m = math.floor(s / 60)
+                    local r = s % 60
+                    song_len_meta = string.format("%d:%02d", m, r)
+                end
+                local timebase_str_meta = nil
+                if meta.timebase_mode ~= nil then
+                    local tb = tonumber(meta.timebase_mode) or 0
+                    if tb == 0 then
+                        timebase_str_meta = "Time"
+                    elseif tb == 1 then
+                        timebase_str_meta = "Beats (position, length, rate)"
+                    elseif tb == 2 then
+                        timebase_str_meta = "Beats (position only)"
                     else
-                        app_state.project_meta_path = meta_panel_pending_path
-                        meta_panel_pending_path = nil
-                        meta_panel_last_t = now_meta
+                        timebase_str_meta = tostring(tb)
                     end
                 end
+                local bpm_str_meta = nil
+                if meta.bpm and meta.bpm > 0 then
+                    bpm_str_meta = string.format("%.2f", meta.bpm)
+                end
+                local tracks_str_meta = nil
+                if meta.tracks_count and meta.tracks_count > 0 then
+                    tracks_str_meta = tostring(meta.tracks_count)
+                end
+                local right_rows = 0
+                right_rows = right_rows + count_lines("Song Length", song_len_meta)
+                right_rows = right_rows + count_lines("Timebase", timebase_str_meta)
+                right_rows = right_rows + count_lines("BPM", bpm_str_meta)
+                right_rows = right_rows + count_lines("Tracks count", tracks_str_meta)
+                local est_rows = math.max(left_rows, right_rows)
+                if est_rows > 0 then
+                    rows = est_rows
+                end
+                return pad_y_meta + (rows * line_h_meta) + gap_meta_timeline + timeline_h_meta + pad_y_meta
             end
-            local meta_panel_visible = meta_panel_h_current > 0.1
 
             if not projects_scroll_restore_done then
                 local saved_y = (app_state and app_state.settings and tonumber(app_state.settings.projects_scroll_y)) or nil
@@ -4139,71 +4272,95 @@ function UI.draw(app_state)
             local rest_count = #rest_indices
 
             local function draw_meta_panel_if_needed(project, row_bottom_y)
-                if meta_panel_visible and meta_project and project == meta_project then
-                    local panel_h = meta_panel_h_current
-                    if panel_h > 0.5 then
-                        local panel_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 0
-                        if panel_w < 0 then panel_w = 0 end
-                        reaper.ImGui_Dummy(ctx, panel_w, panel_h)
-                        local px1, py1 = reaper.ImGui_GetItemRectMin(ctx)
-                        local px2, py2 = reaper.ImGui_GetItemRectMax(ctx)
-                        local dl_panel = reaper.ImGui_GetWindowDrawList(ctx)
-                        local box_y2 = py2 - 1
-                        if box_y2 < py1 then box_y2 = py1 end
-                        reaper.ImGui_DrawList_AddRectFilled(dl_panel, px1, py1, px2, box_y2, COLOR_META_PANEL_BG, 6)
-                        reaper.ImGui_DrawList_AddRect(dl_panel, px1, py1, px2, box_y2, COLOR_META_PANEL_BORDER, 6)
-                        if reaper.ImGui_PushClipRect and reaper.ImGui_PopClipRect then
-                            reaper.ImGui_PushClipRect(ctx, px1, py1, px2, py2, true)
-                            draw_project_meta_panel(ctx, dl_panel, px1, py1, px2, py2, meta_project.parsed_meta, meta_project)
-                            reaper.ImGui_PopClipRect(ctx)
-                        else
-                            draw_project_meta_panel(ctx, dl_panel, px1, py1, px2, py2, meta_project.parsed_meta, meta_project)
-                        end
-                        if bottom_tail_full_h <= 0 and meta_base_h > 0 and win_y and win_h then
-                            local panel_bottom_full = row_bottom_y + meta_base_h
-                            local visible_bottom = win_y + win_h
-                            if panel_bottom_full > (visible_bottom + 0.5) then
-                                bottom_tail_full_h = meta_base_h
-                                if reaper.ImGui_GetScrollY then
-                                    bottom_tail_anchor_y = reaper.ImGui_GetScrollY(ctx) or 0.0
-                                else
-                                    bottom_tail_anchor_y = 0.0
-                                end
-                            end
-                        end
-                    end
+                if not app_state then
+                    return 0
                 end
+                if not project or not project.parsed_meta then
+                    return 0
+                end
+                local p = project.full_path or project.path or ""
+                if p == "" then
+                    return 0
+                end
+                local key = normalize_path(p)
+                if key == "" then
+                    return 0
+                end
+
+                app_state.meta_panel_state = app_state.meta_panel_state or {}
+                local state = app_state.meta_panel_state[key]
+
+                local now_meta = reaper.time_precise()
+                if not state then
+                    state = { h_current = 0, last_t = now_meta }
+                    app_state.meta_panel_state[key] = state
+                end
+
+                local base_h = compute_meta_panel_height(project.parsed_meta)
+                if base_h < 0 then base_h = 0 end
+
+                local is_open = is_project_meta_open(app_state, project)
+                local target_h = is_open and base_h or 0
+
+                local dt_meta = now_meta - (state.last_t or now_meta)
+                state.last_t = now_meta
+                if dt_meta < 0 then dt_meta = 0 end
+                if dt_meta > 0.05 then dt_meta = 0.05 end
+
+                local speed_meta = 24.0
+                local alpha_meta = 1.0 - math.exp(-(dt_meta or 0) * speed_meta)
+                if alpha_meta < 0 then alpha_meta = 0 end
+                if alpha_meta > 1 then alpha_meta = 1 end
+                local ease_meta = alpha_meta * alpha_meta * alpha_meta * (alpha_meta * (alpha_meta * 6.0 - 15.0) + 10.0)
+
+                local h_current = state.h_current or 0
+                h_current = h_current + (target_h - h_current) * ease_meta
+                if math.abs(target_h - h_current) < 0.5 then
+                    h_current = target_h
+                end
+                state.h_current = h_current
+
+                if h_current <= 0.5 then
+                    if not is_open then
+                        app_state.meta_panel_state[key] = nil
+                    end
+                    return 0
+                end
+
+                local panel_h = h_current
+                local panel_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 0
+                if panel_w < 0 then panel_w = 0 end
+                reaper.ImGui_Dummy(ctx, panel_w, panel_h)
+                local px1, py1 = reaper.ImGui_GetItemRectMin(ctx)
+                local px2, py2 = reaper.ImGui_GetItemRectMax(ctx)
+                local dl_panel = reaper.ImGui_GetWindowDrawList(ctx)
+                local box_y2 = py2 - 1
+                if box_y2 < py1 then box_y2 = py1 end
+                reaper.ImGui_DrawList_AddRectFilled(dl_panel, px1, py1, px2, box_y2, COLOR_META_PANEL_BG, 6)
+                reaper.ImGui_DrawList_AddRect(dl_panel, px1, py1, px2, box_y2, COLOR_META_PANEL_BORDER, 6)
+                if reaper.ImGui_PushClipRect and reaper.ImGui_PopClipRect then
+                    reaper.ImGui_PushClipRect(ctx, px1, py1, px2, py2, true)
+                    draw_project_meta_panel(ctx, dl_panel, px1, py1, px2, py2, project.parsed_meta, project)
+                    reaper.ImGui_PopClipRect(ctx)
+                else
+                    draw_project_meta_panel(ctx, dl_panel, px1, py1, px2, py2, project.parsed_meta, project)
+                end
+                return panel_h
             end
 
             if rest_count > 0 then
                 draw_section_header("Recent Projects")
                 for row_i, idx in ipairs(rest_indices) do
                     local project = app_state.filtered_projects[idx]
-                    local _, row_y = reaper.ImGui_GetCursorScreenPos(ctx)
-                    local row_bottom_y = row_y + reserved_height
-                    local content_bottom_y = row_bottom_y
-                    if meta_panel_visible and meta_project and project == meta_project then
-                        content_bottom_y = row_bottom_y + meta_panel_h_current
-                    end
-                    last_row_bottom = content_bottom_y
+                    local _, row_y_top = reaper.ImGui_GetCursorScreenPos(ctx)
                     draw_project_row(idx, project, row_i, row_i == rest_count, "rest")
-                    draw_meta_panel_if_needed(project, row_bottom_y)
+                    local _, row_y_bottom = reaper.ImGui_GetCursorScreenPos(ctx)
+                    local row_bottom_y = row_y_bottom
+                    local added_meta_h = draw_meta_panel_if_needed(project, row_bottom_y)
+                    local content_bottom_y = row_bottom_y + added_meta_h
+                    last_row_bottom = content_bottom_y
                 end
                 draw_section_separator()
-            end
-
-            if bottom_tail_full_h > 0 and reaper.ImGui_GetScrollY then
-                local sy = reaper.ImGui_GetScrollY(ctx) or 0.0
-                if bottom_tail_anchor_y ~= nil and sy < (bottom_tail_anchor_y - 0.5) then
-                    bottom_tail_full_h = 0
-                    bottom_tail_anchor_y = nil
-                end
-            end
-            if bottom_tail_full_h > 0 then
-                reaper.ImGui_Dummy(ctx, 1, bottom_tail_full_h)
-                if last_row_bottom ~= nil then
-                    last_row_bottom = last_row_bottom + bottom_tail_full_h
-                end
             end
 
             projects_scroll_target_y, projects_scroll_last_t =
@@ -4218,13 +4375,13 @@ function UI.draw(app_state)
             end
 
             if reaper.ImGui_GetScrollY then
-                list_scroll_y = reaper.ImGui_GetScrollY(ctx) or 0.0
+                list_scroll.y = reaper.ImGui_GetScrollY(ctx) or 0.0
                 if app_state and app_state.settings then
-                    app_state.settings.projects_scroll_y = list_scroll_y
+                    app_state.settings.projects_scroll_y = list_scroll.y
                 end
             end
             if reaper.ImGui_GetScrollMaxY then
-                list_scroll_max_y = reaper.ImGui_GetScrollMaxY(ctx) or 0.0
+                list_scroll.max = reaper.ImGui_GetScrollMaxY(ctx) or 0.0
             end
         end
 
@@ -4242,8 +4399,8 @@ function UI.draw(app_state)
             local shadow_h = math.max(10, math.floor(frame_h * 0.9))
             shadow_h = math.min(shadow_h, math.floor(list_h * 0.5))
             if shadow_h > 0 then
-                local sy = tonumber(list_scroll_y) or 0.0
-                local maxy = tonumber(list_scroll_max_y) or 0.0
+                local sy = tonumber(list_scroll.y) or 0.0
+                local maxy = tonumber(list_scroll.max) or 0.0
                 local shadow_y = list_y
 
                 local a_top = 0x66
@@ -4740,7 +4897,7 @@ function UI.draw(app_state)
 
         do
             local footer_text = "by Mr. Frenkie"
-            local version_text = "1.0.1"
+            local version_text = "1.1"
             local win_x, win_y = reaper.ImGui_GetWindowPos(ctx)
             local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
             local tw, th = reaper.ImGui_CalcTextSize(ctx, footer_text)
