@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
@@ -211,22 +212,32 @@ function Item.SetAllItemsProps(items, props)
             item_specific_props.velocity_scale = math.max(0.0, math.min(2.0, item_specific_props.velocity_scale))
         elseif base_values and base_values[i] then
             local base_val = base_values[i]
-            if base_val.take_type ~= "MIDI" and base_val.volume and props.base_volume and props.volume ~= nil then
-                local change_factor = props.volume / props.base_volume
-                item_specific_props.volume = base_val.volume * change_factor
-                item_specific_props.volume = math.max(0.0, math.min(4.0, item_specific_props.volume))
-            elseif base_val.take_type == "MIDI" and base_val.velocity_scale and props.base_velocity and props.velocity_scale ~= nil then
-                local change_factor = props.velocity_scale / props.base_velocity
-                item_specific_props.velocity_scale = base_val.velocity_scale * change_factor
-                item_specific_props.velocity_scale = math.max(0.0, math.min(2.0, item_specific_props.velocity_scale))
+            if base_val.take_type ~= "MIDI" then
+                if props.base_volume and props.volume ~= nil then
+                    local change_factor = props.volume / props.base_volume
+                    item_specific_props.volume = math.max(0.0, math.min(4.0, base_val.volume * change_factor))
+                elseif props.volume ~= nil then
+                    item_specific_props.volume = math.max(0.0, math.min(4.0, props.volume))
+                    base_values[i].volume = item_specific_props.volume
+                end
+            else
+                if props.base_velocity and props.velocity_scale ~= nil then
+                    local change_factor = props.velocity_scale / props.base_velocity
+                    item_specific_props.velocity_scale = math.max(0.0, math.min(2.0, base_val.velocity_scale * change_factor))
+                elseif props.velocity_scale ~= nil then
+                    item_specific_props.velocity_scale = math.max(0.0, math.min(2.0, props.velocity_scale))
+                    base_values[i].velocity_scale = item_specific_props.velocity_scale
+                end
             end
         else
-            if props.volume ~= nil then item_specific_props.volume = props.volume end
-            if props.velocity_scale ~= nil then item_specific_props.velocity_scale = props.velocity_scale end
+            if props.volume ~= nil then item_specific_props.volume = math.max(0.0, math.min(4.0, props.volume)) end
+            if props.velocity_scale ~= nil then item_specific_props.velocity_scale = math.max(0.0, math.min(2.0, props.velocity_scale)) end
         end
         Item.SetItemProps(item, item_specific_props)
         ::continue::
     end
+    state.base_values = base_values
+    Core.SetState(state)
     r.UpdateArrange()
 end
 

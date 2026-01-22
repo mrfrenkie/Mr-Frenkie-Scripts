@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
@@ -75,8 +76,21 @@ function Fader.VolumeControl(ctx, items, props, base_values, bar_color, UI)
     UI.StyledResetButton(ctx, 'Vol:', 35, is_vol_modified, function()
         props.volume = 1.0
         Utils.with_undo("Reset Volume", function()
-            local reset_props = { volume = 1.0 }
-            Item.SetAllItemsProps(items, reset_props)
+            if #items > 1 then
+                for _, item in ipairs(items) do
+                    if item and r.ValidatePtr(item, "MediaItem*") then
+                        local take = r.GetActiveTake(item)
+                        if take then
+                            r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1.0)
+                        end
+                    end
+                end
+                r.UpdateArrange()
+            else
+                local vol_props = { volume = 1.0 }
+                Item.SetItemProps(items[1], vol_props)
+                r.UpdateArrange()
+            end
         end)
         ResetAccumulatedVolume()
     end, false, is_vol_mixed)

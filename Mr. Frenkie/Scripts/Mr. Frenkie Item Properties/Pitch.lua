@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")

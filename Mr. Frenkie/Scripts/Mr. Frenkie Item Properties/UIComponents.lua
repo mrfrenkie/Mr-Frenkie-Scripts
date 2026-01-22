@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
 local script_dir = script_path:match("(.*[\\/])") or ""
@@ -413,16 +414,28 @@ end
 
 local _pitch_drag_state = {}
 
-function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_val, max_val, format, reset_action, label_width, has_different_values, is_modified, is_mixed, agg_count)
+function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_val, max_val, format, reset_action, label_width, has_different_values, is_modified, is_mixed, agg_count, color_by_sign, octave_drag_default)
     if is_modified == nil then
         is_modified = (value ~= 0)
     end
-    UIComponents.StyledResetButton(ctx, label, label_width or 40, is_modified, reset_action, nil, is_mixed)
+    local id = label
+    local disp_val = (_pitch_drag_state[id] and _pitch_drag_state[id].last) or value
+    local disp_int = math.floor(disp_val + 0.5)
+    local pushed_custom = false
+    if color_by_sign and not is_mixed then
+        local col = (disp_int > 0) and Theme.get('turquoise') or ((disp_int < 0) and Theme.get('orange_dark') or Theme.get('text_white_soft'))
+        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), col)
+        pushed_custom = true
+        UIComponents.StyledResetButton(ctx, label, label_width or 40, false, reset_action, nil, false)
+        r.ImGui_PopStyleColor(ctx, 1)
+    else
+        UIComponents.StyledResetButton(ctx, label, label_width or 40, is_modified, reset_action, nil, is_mixed)
+    end
     if agg_count and agg_count > 1 then UIComponents.ExtendAggHoverRegion(ctx) end
     r.ImGui_SameLine(ctx, 0, 2)
     local w = width or 50
     local fmt = format or "%.0f"
-    local text = string.format(fmt, value)
+    local text = string.format(fmt, disp_int)
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Button(), Theme.get('gray_42'))
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonHovered(), Theme.get('gray_58'))
     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_ButtonActive(), Theme.get('gray_74'))
@@ -435,7 +448,6 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
     local item_deactivated = r.ImGui_IsItemDeactivated(ctx)
     local activated = r.ImGui_IsItemActivated(ctx)
     local mouse_down = r.ImGui_IsMouseDown(ctx, 0)
-    local id = label
     if activated then
         _pitch_drag_state[id] = { start = value, last = value }
     end
@@ -445,14 +457,30 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
         local dx, dy = r.ImGui_GetMouseDragDelta(ctx, 0)
         local s = speed or 0.1
         local shift = (r.ImGui_GetKeyMods(ctx) & r.ImGui_Mod_Shift()) ~= 0
-        local s2 = shift and (s * 2) or s
-        local raw = _pitch_drag_state[id].start + (-dy) * s2
-        if shift then
-            local diff = raw - _pitch_drag_state[id].start
-            local steps = math.floor(diff / 12 + 0.5)
-            new_value = _pitch_drag_state[id].start + steps * 12
+        local octave_mode = (octave_drag_default ~= false)
+        local s2
+        if octave_mode then
+            s2 = shift and s or (s * 5)
         else
-            new_value = raw
+            s2 = shift and (s * 5) or s
+        end
+        local raw = _pitch_drag_state[id].start + (-dy) * s2
+        if octave_mode then
+            if shift then
+                new_value = math.floor(raw + 0.5)
+            else
+                local diff = raw - _pitch_drag_state[id].start
+                local steps = math.floor(diff / 12 + 0.5)
+                new_value = _pitch_drag_state[id].start + steps * 12
+            end
+        else
+            if shift then
+                local diff = raw - _pitch_drag_state[id].start
+                local steps = math.floor(diff / 12 + 0.5)
+                new_value = _pitch_drag_state[id].start + steps * 12
+            else
+                new_value = math.floor(raw + 0.5)
+            end
         end
         local mn = min_val or -999
         local mx = max_val or 999
@@ -462,6 +490,12 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
             changed = true
             _pitch_drag_state[id].last = new_value
         end
+    end
+    local hovered = r.ImGui_IsItemHovered(ctx)
+    local dbl = hovered and r.ImGui_IsMouseDoubleClicked(ctx, 0)
+    if dbl and not (agg_count and agg_count > 1) then
+        changed = true
+        new_value = 0
     end
     local deactivated = false
     if not mouse_down and _pitch_drag_state[id] then

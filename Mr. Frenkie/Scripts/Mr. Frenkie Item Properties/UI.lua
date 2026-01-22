@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local script_path_full = debug.getinfo(1, 'S').source:match('@(.*)')
 local script_dir = script_path_full:match('(.*[\\/])') or ''
@@ -42,6 +43,8 @@ local mute_icon_mixed = nil
 local lock_icon_locked = nil
 local lock_icon_unlocked = nil
 local lock_icon_mixed = nil
+local first_auto_resize = true
+local initial_item_width = 1100
 
 local function CreateFont(file_path)
     return r.ImGui_CreateFont(file_path)
@@ -141,7 +144,7 @@ end
 local function GetTrackSelectionKey(tracks)
     local parts = {}
     for _, tr in ipairs(tracks or {}) do
-        parts[#parts + 1] = reaper.GetTrackGUID(tr) or ''
+        parts[#parts + 1] = r.GetTrackGUID(tr) or ''
     end
     return table.concat(parts, '|')
 end
@@ -168,27 +171,38 @@ local function Main()
     local ms_left = r.JS_Mouse_GetState(1)
     local ms_right = r.JS_Mouse_GetState(2)
     if (ms_left == 1 or ms_right == 2) and not state.last_mouse_state then
+        state.last_mouse_button = (ms_right == 2) and 2 or 1
         local window, segment, details = r.BR_GetMouseCursorContext()
         if window ~= 'unknown' then
-            if window == 'tcp' then
+            local it = r.BR_GetMouseCursorContext_Item()
+            if it and r.ValidatePtr(it, 'MediaItem*') then
+                state.prefer_track_context = false
+                state.force_track_context = false
+            elseif window == 'tcp' or window == 'mcp' then
                 state.prefer_track_context = true
-            else
-                local it = r.BR_GetMouseCursorContext_Item()
-                if it and r.ValidatePtr(it, 'MediaItem*') then
-                    state.prefer_track_context = false
-                elseif window == 'arrange' and segment == 'track' then
-                    state.prefer_track_context = true
+                state.force_track_context = true
+                local tr, pos = r.BR_TrackAtMouseCursor()
+                if tr and r.ValidatePtr(tr, 'MediaTrack*') then
+                    state.hovered_track = tr
+                else
+                    state.hovered_track = nil
                 end
+            else
+                state.force_track_context = false
             end
         end
         local items_now = Item.GetSelectedItems()
         local tracks_now = Track.GetSelectedTracks()
-        if #items_now > 0 then
-            state.prefer_track_context = false
-        elseif #tracks_now > 0 then
-            state.prefer_track_context = true
+        if not state.force_track_context then
+            if #items_now > 0 then
+                state.prefer_track_context = false
+            elseif #tracks_now > 0 then
+                state.prefer_track_context = true
+            end
         end
-        if state.prefer_track_context and #tracks_now > 0 then
+        if state.force_track_context then
+            state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+        elseif state.prefer_track_context and #tracks_now > 0 then
             state.cached_props = { take_type = 'Track', name = 'Selected Track' }
         elseif #items_now > 0 then
             state.cached_props = Item.GetAggregatedProps(items_now)
@@ -202,6 +216,38 @@ local function Main()
         state.last_mouse_state = true
         core.SetState(state)
     elseif ms_left == 0 and ms_right == 0 and state.last_mouse_state then
+        local items_now = Item.GetSelectedItems()
+        local tracks_now = Track.GetSelectedTracks()
+        if state.last_mouse_button == 2 then
+            state.force_track_context = false
+            if #items_now > 0 then
+                state.prefer_track_context = false
+                state.cached_props = Item.GetAggregatedProps(items_now)
+            elseif #tracks_now > 0 then
+                state.prefer_track_context = true
+                state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+            else
+                state.cached_props = {}
+            end
+        else
+            if state.force_track_context then
+                state.prefer_track_context = true
+                state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+            else
+                if #items_now > 0 then
+                    state.prefer_track_context = false
+                    state.cached_props = Item.GetAggregatedProps(items_now)
+                elseif #tracks_now > 0 then
+                    state.prefer_track_context = true
+                    state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+                else
+                    state.cached_props = {}
+                end
+            end
+        end
+        state.cached_items = items_now
+        state.cached_tracks = tracks_now
+        state.last_mouse_button = 0
         state.last_mouse_state = false
         core.SetState(state)
     end
@@ -213,24 +259,32 @@ local function Main()
     PushFont(ctx, font, 13)
     UI.ApplyWindowStyle(ctx)
 
-    r.ImGui_SetNextWindowSize(ctx, 400, 600, r.ImGui_Cond_FirstUseEver())
-    local visible, open = r.ImGui_Begin(ctx, 'Item Properties', true, r.ImGui_WindowFlags_None())
+    r.ImGui_SetNextWindowSize(ctx, initial_item_width or 1000, 600, r.ImGui_Cond_FirstUseEver())
+    local flags = r.ImGui_WindowFlags_None()
+    if first_auto_resize then flags = flags | r.ImGui_WindowFlags_AlwaysAutoResize() end
+    local visible, open = r.ImGui_Begin(ctx, 'Item Properties', true, flags)
+    if r.ImGui_IsWindowAppearing(ctx) then first_auto_resize = false end
 
     if visible then
         local state = core.GetState()
         local items = Item.GetSelectedItems()
-        local tracks = Track.GetSelectedTracks()
+        local selected_tracks = Track.GetSelectedTracks()
+        local tracks = selected_tracks
+        if state.force_track_context and state.hovered_track and r.ValidatePtr(state.hovered_track, 'MediaTrack*') then
+            tracks = { state.hovered_track }
+        end
         local old_items = state.cached_items or {}
         local old_tracks = state.cached_tracks or {}
 
         local items_changed = not Utils.shallow_equal(old_items, items)
         local tracks_changed = not Utils.shallow_equal(old_tracks, tracks)
         local should_update_cache = items_changed or tracks_changed
-
-        if #items > 0 then
-            state.prefer_track_context = false
-        elseif #tracks > 0 then
-            state.prefer_track_context = true
+        if not state.force_track_context then
+            if #items > 0 then
+                state.prefer_track_context = false
+            elseif #tracks > 0 then
+                state.prefer_track_context = true
+            end
         end
         if should_update_cache then
             if state.prefer_track_context and #tracks > 0 then
@@ -358,6 +412,26 @@ local function Main()
             if IsTrackSelection(props) then
                 r.ImGui_BeginGroup(ctx)
                 UI.RenderInfoButton(ctx, 41654)
+                UI.Separator(ctx)
+                local single_track = (#tracks >= 1 and r.ValidatePtr(tracks[1], 'MediaTrack*')) and tracks[1] or nil
+                local current_val = 0
+                local has_mt_fx = false
+                if single_track then
+                    local v = Track.GetMidiTransposeValue(single_track)
+                    if v ~= nil then current_val = v end
+                    has_mt_fx = (Track.FindMidiTransposeFX(single_track) ~= nil)
+                end
+                local mt_changed, mt_new, mt_deactivated = UI.VerticalPitchControl(ctx, 'MIDI Transpose', current_val, 50, 0.1, -48, 48, '%.0f st', function()
+                    if single_track then
+                        Track.RemoveMidiTransposeFX({ single_track })
+                    end
+                end, 110, nil, has_mt_fx, nil, nil, true, true)
+                if mt_changed and single_track then
+                    Track.UpdateMidiTransposeImmediate({ single_track }, mt_new)
+                end
+                if mt_deactivated and single_track then
+                    Track.FinalizeMidiTranspose()
+                end
                 UI.Separator(ctx)
                 local fs = state.freeze_stats or { total = 0, has = false, track_count = #tracks, mixed = false, all_frozen = false }
                 local base, hover, active, push_black = UI.GetFreezeAccentColors(fs)
@@ -533,7 +607,7 @@ local function Main()
                 local pitch_changed, new_pitch, pitch_deactivated = UI.VerticalPitchControl(ctx, 'Pitch:', current_pitch, 50, 0.1, -48, 48, '%.0f st', function()
                     pitch_module.HandlePitchReset(items, base_values)
                     props.pitch = 0
-                end, nil, false, is_modified, is_mixed, #items)
+                end, nil, false, is_modified, is_mixed, #items, nil, false)
                 if #items > 1 and r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseDoubleClicked(ctx, 0) then
                     pitch_module.RevertAggregatedPitchChanges(items, base_values)
                     props.pitch = 0
@@ -644,7 +718,7 @@ local function Main()
     end
 end
 
-function loop()
+local function loop()
     EnsureImGuiContext()
     Main()
 end

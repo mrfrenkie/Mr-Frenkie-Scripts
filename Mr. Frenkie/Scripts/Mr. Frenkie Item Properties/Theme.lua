@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local Theme = {}
 
@@ -40,6 +41,8 @@ Theme.colors = {
     beige_base = Theme.rgba(222, 203, 164, 255),
     beige_hover = Theme.rgba(230, 211, 174, 255),
     beige_active = Theme.rgba(238, 219, 184, 255),
+    orange_dark = Theme.rgba(255, 140, 0, 255),
+    turquoise = Theme.rgba(64, 224, 208, 255),
 
     text_gray = Theme.rgba(128, 128, 128, 255),     -- Отключённый текст
     text_gray_bright = Theme.rgba(180, 180, 180, 255),

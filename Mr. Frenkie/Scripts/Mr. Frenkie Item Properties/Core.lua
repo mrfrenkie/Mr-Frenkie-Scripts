@@ -1,3 +1,4 @@
+---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
@@ -26,6 +27,9 @@ local update_interval = 1/30
 local last_gc_time = 0
 local gc_interval = 10
 local prefer_track_context = false
+local force_track_context = false
+local hovered_track = nil
+local last_mouse_button = 0
 
 local ItemPropsCore = {}
 
@@ -445,7 +449,10 @@ function ItemPropsCore.GetState()
         base_values = base_values,
         current_selection = current_selection,
         last_mouse_state = last_mouse_state,
+        last_mouse_button = last_mouse_button,
         prefer_track_context = prefer_track_context,
+        force_track_context = force_track_context,
+        hovered_track = hovered_track,
         cached_items = cached_items,
         cached_tracks = cached_tracks,
         cached_props = cached_props,
@@ -467,7 +474,10 @@ function ItemPropsCore.SetState(state)
     base_values = state.base_values or {}
     current_selection = state.current_selection or {}
     last_mouse_state = state.last_mouse_state or false
+    last_mouse_button = state.last_mouse_button or 0
     prefer_track_context = state.prefer_track_context or false
+    force_track_context = state.force_track_context or false
+    hovered_track = state.hovered_track
     cached_items = state.cached_items or {}
     cached_tracks = state.cached_tracks or {}
     cached_props = state.cached_props
