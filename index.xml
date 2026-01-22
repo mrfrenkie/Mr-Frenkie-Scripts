@@ -87,7 +87,6 @@
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/Muted.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/Muted.afdesign</source>
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/locked.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/locked.afdesign</source>
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/reverse.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/reverse.afdesign</source>
-        <source file="Mr. Frenkie Item Properties/User Manual (AI rus).pdf">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/User%20Manual%20(AI%20rus).pdf</source>
         <changelog><![CDATA[Initial release]]></changelog>
       </version>
       <version name="2.7" author="Mr. Frenkie" time="2026-01-22T12:00:00Z">
@@ -126,7 +125,6 @@
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/Muted.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/Muted.afdesign</source>
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/locked.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/locked.afdesign</source>
         <source file="Mr. Frenkie Item Properties/icons/Icon Source/reverse.afdesign">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/icons/Icon%20Source/reverse.afdesign</source>
-        <source file="Mr. Frenkie Item Properties/User Manual (AI rus).pdf">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/User%20Manual%20(AI%20rus).pdf</source>
         <changelog><![CDATA[Frenkie Item Properties 2.7:
 
 - Track context: Added MIDI Transpose; JSFX auto-inserts first in the FX chain with Embedded UI (mouse drag - octaves, Shift+mouse drag - semitones)
