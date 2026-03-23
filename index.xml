@@ -137,10 +137,10 @@
       </metadata>
     </reapack>
     <reapack name="Transient Detector (Frenkie)" type="extension" desc="Transient Detector (Frenkie)">
-      <version name="1.0beta2" author="Mr. Frenkie" time="2026-03-24T12:00:00Z">
-        <source platform="darwin-arm64" file="reaper_frenkie_TransientDetector.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_new/reaper_frenkie_TransientDetector.dylib</source>
-        <source platform="win64" file="reaper_frenkie_TransientDetector.dll">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_win/reaper_frenkie_TransientDetector.dll</source>
-        <changelog><![CDATA[Beta 2
+      <version name="1.0beta1" author="Mr. Frenkie" time="2026-03-23T12:00:00Z">
+        <source platform="darwin-arm64" file="reaper_frenkie_TransientDetector.dylib">https://raw.githubusercontent.com/mrfrenkie/Mr-Frenkie-Scripts/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_new/reaper_frenkie_TransientDetector.dylib</source>
+        <source platform="win64" file="reaper_frenkie_TransientDetector.dll">https://raw.githubusercontent.com/mrfrenkie/Mr-Frenkie-Scripts/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_win/reaper_frenkie_TransientDetector.dll</source>
+        <changelog><![CDATA[Beta 1
 Transient Detector for batch real-time transient detection.
 Two actions included:
 - Transient Detector (Frenkie): Set Stretch Markers
