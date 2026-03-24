@@ -1,6 +1,7 @@
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local Utils = require("Utils")
+local JSFX = require("jsfx")
 
 local Track = {}
 
@@ -77,8 +78,49 @@ end
 local HP_FX_NAME = "JS: Mr. Frenkie/Low Cut 24 dB/oct"
 local LP_FX_NAME = "JS: Mr. Frenkie/High Cut 24 dB/oct"
 
+local function join_path(a, b)
+    if not a or a == "" then return b or "" end
+    if not b or b == "" then return a end
+    local sep = package.config:sub(1, 1)
+    local a_last = a:sub(-1)
+    if a_last == "/" or a_last == "\\" then
+        return a .. b
+    end
+    return a .. sep .. b
+end
+
+local function write_file_if_missing(path, content)
+    if r.file_exists and r.file_exists(path) then
+        return true
+    end
+    local f = io.open(path, "wb")
+    if not f then
+        return false
+    end
+    f:write(content or "")
+    f:close()
+    return true
+end
+
+local function ensure_item_properties_jsfx_files()
+    local resource_path = r.GetResourcePath and r.GetResourcePath() or nil
+    if not resource_path or resource_path == "" then
+        return false
+    end
+    local effects_dir = join_path(resource_path, "Effects")
+    local target_dir = join_path(effects_dir, "Mr. Frenkie")
+    if r.RecursiveCreateDirectory then
+        r.RecursiveCreateDirectory(target_dir, 0)
+    end
+    local ok_mt = write_file_if_missing(join_path(target_dir, "MIDI Transpose and Monitor.jsfx"), JSFX.MIDI_TRANSPOSE_UTILITY_JSFX)
+    local ok_hp = write_file_if_missing(join_path(target_dir, "Low Cut 24 dB_oct.jsfx"), JSFX.LOW_CUT_24DB_JSFX)
+    local ok_lp = write_file_if_missing(join_path(target_dir, "High Cut 24 dB_oct.jsfx"), JSFX.HIGH_CUT_24DB_JSFX)
+    return ok_mt and ok_hp and ok_lp
+end
+
 local function ensure_mt_front(track)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
+    ensure_item_properties_jsfx_files()
     if not (r.APIExists and r.APIExists("FIP_EnsureMidiTransposeFront")) then return nil end
     local idx = r.FIP_EnsureMidiTransposeFront(track, "", 0)
     if idx == nil or idx < 0 then return nil end
@@ -100,6 +142,7 @@ end
 -- norm_when_create, slope_when_create: used only when adding NEW FX (no existing). When re-adding we read from existing.
 local function ensure_hp_only_at_end(track, norm_when_create, slope_when_create)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
+    ensure_item_properties_jsfx_files()
     if not (r.APIExists and r.APIExists("FIP_EnsureHPFilterOnly")) then return nil end
     local norm = norm_when_create
     local slope = slope_when_create
@@ -113,6 +156,7 @@ end
 
 local function ensure_lp_only_at_end(track, norm_when_create, slope_when_create)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
+    ensure_item_properties_jsfx_files()
     if not (r.APIExists and r.APIExists("FIP_EnsureLPFilterOnly")) then return nil end
     local norm = norm_when_create
     local slope = slope_when_create
@@ -126,6 +170,7 @@ end
 
 local function ensure_filters_at_end(track)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
+    ensure_item_properties_jsfx_files()
     if not (r.APIExists and r.APIExists("FIP_EnsureFiltersAtEnd")) then return end
     r.FIP_EnsureFiltersAtEnd(track, "", 0)
 end
