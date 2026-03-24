@@ -152,6 +152,17 @@ Tip: Try creating a REAPER custom action with "Set Stretch Markers" and the nati
         <description><![CDATA[{\rtf1 {\fonttbl {\f0 Helvetica;}} \f0\fs40 Transient Detector for batch real-time transient detection.\line\line Two actions included:\line - Transient Detector (Frenkie): Set Stretch Markers\line - Transient Detector (Frenkie): Slice by Transients\line\line Tip: Try creating a REAPER custom action with "Set Stretch Markers" and the native action "Item: Snap stretch markers to grid" to get classic audio quantization behavior.}]]></description>
       </metadata>
     </reapack>
+    <reapack name="Meta Item (Frenkie)" type="extension" desc="Meta Item (Frenkie)">
+      <version name="1.0.0" author="Mr. Frenkie" time="2026-03-24T12:00:00Z">
+        <source platform="darwin-arm64" file="reaper_frenkie_meta_item.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Extensions/META%20ITEM%20EXTENSION/build/reaper_frenkie_meta_item.dylib</source>
+        <source platform="win64" file="reaper_frenkie_meta_item.dll">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Extensions/META%20ITEM%20EXTENSION/build_win/reaper_frenkie_meta_item.dll</source>
+        <changelog><![CDATA[- bug fixes]]></changelog>
+      </version>
+      <metadata>
+        <link rel="website">https://github.com/mrfrenkie/Mr-Frenkie-Scripts</link>
+        <description><![CDATA[{\rtf1 {\fonttbl {\f0 Helvetica;}} \f0\fs40 Meta Item extension.}]]></description>
+      </metadata>
+    </reapack>
   </category>
   <metadata>
     <link rel="website">https://github.com/frenkie/ReaPack</link>
