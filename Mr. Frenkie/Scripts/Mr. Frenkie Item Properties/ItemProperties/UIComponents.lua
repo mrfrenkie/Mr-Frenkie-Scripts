@@ -310,6 +310,131 @@ function UIComponents.DragDoubleInput(ctx, id, value, width, speed, min_val, max
     return changed, new_value, deactivated
 end
 
+local _freqbox_drag_state = {}
+local _freqbox_last_activated = {}
+local FREQBOX_DOUBLE_CLICK_SEC = 0.45
+
+-- Numeric box: "20k"/"1k"/"999 Hz", left-mouse drag. reset_norm: double-click sets to this (0=20Hz HP, 1=20k LP).
+function UIComponents.FreqBox(ctx, id, norm, width, color, inverted, display_fn, reset_norm)
+    local box_h = 18
+    r.ImGui_InvisibleButton(ctx, id, width, box_h)
+    local x1, y1 = r.ImGui_GetItemRectMin(ctx)
+    local x2, y2 = r.ImGui_GetItemRectMax(ctx)
+    local dl = r.ImGui_GetWindowDrawList(ctx)
+    local bg = Theme.get('gray_42')
+    local border = Theme.get('gray_74')
+    r.ImGui_DrawList_AddRectFilled(dl, x1, y1, x2, y2, bg, 4)
+    r.ImGui_DrawList_AddRect(dl, x1, y1, x2, y2, border, 4, 0, 1.0)
+    local display_str = display_fn(norm)
+    local tw, th = r.ImGui_CalcTextSize(ctx, display_str)
+    local pad = 4
+    local ty = y1 + (box_h - th) * 0.5
+    r.ImGui_DrawList_AddText(dl, x1 + pad, ty, color, display_str)
+
+    local changed = false
+    local new_norm = norm
+    local activated = r.ImGui_IsItemActivated(ctx)
+    local active = r.ImGui_IsItemActive(ctx)
+    local deactivated = Utils.ClearCursorContextOnDeactivation(ctx)
+
+    if reset_norm ~= nil and activated then
+        local now = r.time_precise()
+        local last = _freqbox_last_activated[id]
+        if last and (now - last) <= FREQBOX_DOUBLE_CLICK_SEC then
+            new_norm = math.max(0, math.min(1, reset_norm))
+            changed = true
+            _freqbox_last_activated[id] = nil
+        else
+            _freqbox_last_activated[id] = now
+        end
+    end
+
+    if activated and not changed then
+        _freqbox_drag_state[id] = { start = norm }
+    end
+    if active and _freqbox_drag_state[id] and not changed then
+        local state = _freqbox_drag_state[id]
+        local dx, _dy = r.ImGui_GetMouseDragDelta(ctx, 0)
+        local dx_val = (type(dx) == "number") and dx or (type(dx) == "table" and dx.x)
+        if dx_val and type(dx_val) == "number" then
+            local sens = (width and width > 0) and (0.8 / (width * 3)) or 0.000033
+            local shift = (r.ImGui_GetKeyMods(ctx) & r.ImGui_Mod_Shift()) ~= 0
+            if shift then sens = sens * 0.1 end
+            -- HP: drag right (dx>0) -> norm up. LP: drag left (dx<0) -> norm down.
+            local delta_norm = dx_val * sens
+            new_norm = state.start + delta_norm
+            if new_norm < 0 then new_norm = 0 end
+            if new_norm > 1 then new_norm = 1 end
+            changed = true  -- always report during drag so host/JSFX get updated every frame
+        end
+    end
+    if deactivated then
+        _freqbox_drag_state[id] = nil
+    end
+    UIComponents.DrawHoverActiveOverlay(ctx)
+    return changed, new_norm, activated
+end
+
+-- FreqBoxHz: works with Hz directly, logarithmic drag behavior
+function UIComponents.FreqBoxHz(ctx, id, freq_hz, width, color, inverted, display_fn, reset_freq_hz)
+    local box_h = 18
+    r.ImGui_InvisibleButton(ctx, id, width, box_h)
+    local x1, y1 = r.ImGui_GetItemRectMin(ctx)
+    local x2, y2 = r.ImGui_GetItemRectMax(ctx)
+    local dl = r.ImGui_GetWindowDrawList(ctx)
+    local bg = Theme.get('gray_42')
+    local border = Theme.get('gray_74')
+    r.ImGui_DrawList_AddRectFilled(dl, x1, y1, x2, y2, bg, 4)
+    r.ImGui_DrawList_AddRect(dl, x1, y1, x2, y2, border, 4, 0, 1.0)
+    local display_str = display_fn(freq_hz)
+    local tw, th = r.ImGui_CalcTextSize(ctx, display_str)
+    local pad = 4
+    local ty = y1 + (box_h - th) * 0.5
+    r.ImGui_DrawList_AddText(dl, x1 + pad, ty, color, display_str)
+
+    local changed = false
+    local new_freq = freq_hz
+    local activated = r.ImGui_IsItemActivated(ctx)
+    local active = r.ImGui_IsItemActive(ctx)
+    local deactivated = Utils.ClearCursorContextOnDeactivation(ctx)
+
+    if reset_freq_hz ~= nil and activated then
+        local now = r.time_precise()
+        local last = _freqbox_last_activated[id]
+        if last and (now - last) <= FREQBOX_DOUBLE_CLICK_SEC then
+            new_freq = reset_freq_hz
+            changed = true
+            _freqbox_last_activated[id] = nil
+        else
+            _freqbox_last_activated[id] = now
+        end
+    end
+
+    if activated and not changed then
+        _freqbox_drag_state[id] = { start = freq_hz }
+    end
+    if active and _freqbox_drag_state[id] and not changed then
+        local state = _freqbox_drag_state[id]
+        local dx = r.ImGui_GetMouseDragDelta(ctx, 0)
+        if dx and type(dx) == "number" then
+            -- Logarithmic drag: multiply by exp(dx * factor)
+            local factor = 0.005 -- base sensitivity
+            local shift = (r.ImGui_GetKeyMods(ctx) & r.ImGui_Mod_Shift()) ~= 0
+            if shift then factor = factor * 0.1 end
+            local delta_factor = dx * factor
+            if inverted then delta_factor = -delta_factor end
+            new_freq = state.start * math.exp(delta_factor)
+            new_freq = math.max(20, math.min(20000, new_freq))
+            if new_freq ~= freq_hz then changed = true end
+        end
+    end
+    if deactivated then
+        _freqbox_drag_state[id] = nil
+    end
+    UIComponents.DrawHoverActiveOverlay(ctx)
+    return changed, new_freq
+end
+
 function UIComponents.ApplyWindowStyle(ctx)
     r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowRounding(), 8)
     r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(), 4)
@@ -410,6 +535,84 @@ function UIComponents.ParameterControl(ctx, label, value, width, speed, min_val,
     r.ImGui_SameLine(ctx, 0, 2)
     local changed, new_value, deactivated = UIComponents.DragDoubleInput(ctx, '##' .. label, value, width or 50, speed, min_val, max_val, format)
     return changed, new_value, deactivated
+end
+
+local _knob_drag_state = {}
+
+function UIComponents.Knob(ctx, id, value, min_val, max_val, default_value, radius, active)
+    radius = radius or 9
+    local size = radius * 2 + 4
+    if id then r.ImGui_PushID(ctx, id) end
+    r.ImGui_InvisibleButton(ctx, '##knob', size, size)
+    if id then r.ImGui_PopID(ctx) end
+
+    local x1, y1 = r.ImGui_GetItemRectMin(ctx)
+    local x2, y2 = r.ImGui_GetItemRectMax(ctx)
+    local cx = (x1 + x2) * 0.5
+    local cy = (y1 + y2) * 0.5
+    local dl = r.ImGui_GetWindowDrawList(ctx)
+
+    local bg = Theme.get('gray_42')
+    local border = Theme.get('gray_74')
+    local accent = (active == false) and Theme.get('pipe_gray') or Theme.get('green_accent')
+
+    r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, radius, bg, 32)
+    r.ImGui_DrawList_AddCircle(dl, cx, cy, radius, border, 32, 1.0)
+    r.ImGui_DrawList_AddCircleFilled(dl, cx, cy, 2.0, Theme.get('black'), 16)
+
+    local range = max_val - min_val
+    if range <= 0 then range = 1 end
+    local t = (value - min_val) / range
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    local angle_start = -math.pi * 1.25
+    local angle_end = math.pi * 0.25
+    local angle = angle_start + t * (angle_end - angle_start)
+    local r_inner = radius * 0.65
+    local x_end = cx + math.cos(angle) * r_inner
+    local y_end = cy + math.sin(angle) * r_inner
+    r.ImGui_DrawList_AddLine(dl, cx, cy, x_end, y_end, accent, 2.0)
+
+    local id_key = id or 'knob'
+    local changed = false
+    local new_value = value
+    local reset = false
+
+    local active = r.ImGui_IsItemActive(ctx)
+    if active then
+        local state = _knob_drag_state[id_key]
+        if not state then
+            _knob_drag_state[id_key] = { start = value }
+            state = _knob_drag_state[id_key]
+        end
+        local _, dy = r.ImGui_GetMouseDragDelta(ctx, 0)
+        local speed = range / 200.0
+        local shift = (r.ImGui_GetKeyMods(ctx) & r.ImGui_Mod_Shift()) ~= 0
+        if shift then speed = speed * 0.05 end
+        local v = state.start + (-dy) * speed
+        if shift then
+            v = math.floor(v + 0.5)
+        end
+        if v < min_val then v = min_val end
+        if v > max_val then v = max_val end
+        if v ~= new_value then
+            new_value = v
+            changed = true
+        end
+    end
+
+    local hovered = r.ImGui_IsItemHovered(ctx)
+    if hovered and r.ImGui_IsMouseDoubleClicked(ctx, 0) and default_value ~= nil then
+        new_value = default_value
+        changed = true
+        reset = true
+    end
+
+    local deactivated = Utils.ClearCursorContextOnDeactivation(ctx)
+    if deactivated then
+        _knob_drag_state[id_key] = nil
+    end
+
+    return changed, new_value, deactivated, reset
 end
 
 local _pitch_drag_state = {}

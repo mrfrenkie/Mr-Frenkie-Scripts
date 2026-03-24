@@ -6,75 +6,91 @@ local script_dir = script_path:match("(.*[\\/])") or ""
 
 package.path = script_dir .. "?.lua;" .. script_dir .. "?/init.lua;" .. package.path
 local Core = require("Core")
-local Utils = require("Utils")
 local Theme = require("Theme")
 
 local Take = {}
+Take._take_menu_cache = Take._take_menu_cache or { key = "", names = {} }
 
 function Take.Render(ctx, items, props, UI, bar_color)
     UI.Separator(ctx)
     local label_text = 'Take'
     local active_display = nil
     local total_takes = nil
-    if #items == 1 and r.ValidatePtr(items[1], 'MediaItem*') then
-        local item = items[1]
-        total_takes = r.GetMediaItemNumTakes(item)
-        local active_take = r.GetActiveTake(item)
-        local active_index = 0
-        if active_take then
-            active_index = math.floor(r.GetMediaItemTakeInfo_Value(active_take, 'IP_TAKENUMBER'))
-        end
-        active_display = (active_index + 1)
-        if total_takes and total_takes > 0 then
-            label_text = string.format('Take %d/%d', active_display, total_takes)
-        end
+    local has_count_api = r.APIExists and r.APIExists("FIP_GetSingleSelectedItemTakeCountVal")
+    local has_index_api = r.APIExists and r.APIExists("FIP_GetSingleSelectedItemActiveTakeIndexVal")
+    local has_names_api = r.APIExists and r.APIExists("FIP_GetSingleSelectedItemTakeNamesStr")
+    local has_set_api = r.APIExists and r.APIExists("FIP_ApplySingleSelectedItemActiveTakeIndexVal")
+    local has_shift_api = r.APIExists and r.APIExists("FIP_ApplyShiftSingleSelectedItemActiveTakeVal")
+    local has_toggle_api = r.APIExists and r.APIExists("FIP_GetTakeButtonToggleStateVal")
+    local has_action_api = r.APIExists and r.APIExists("FIP_RunTakeButtonActionVal")
+    local take_count = has_count_api and r.FIP_GetSingleSelectedItemTakeCountVal("", 0) or -1
+    local active_index = has_index_api and r.FIP_GetSingleSelectedItemActiveTakeIndexVal("", 0) or -1
+    if type(take_count) == "number" and take_count > 0 and type(active_index) == "number" and active_index >= 0 then
+        total_takes = math.floor(take_count)
+        active_display = math.floor(active_index) + 1
+        label_text = string.format('Take %d/%d', active_display, total_takes)
     end
     local _, use_black = UI.GetBarColorAndUseBlack(items, {}, props)
     if not label_text:match(":$") then
         label_text = label_text .. ":"
     end
-    local is_on = (r.GetToggleCommandStateEx and r.GetToggleCommandStateEx(0, 40435) == 1) or (r.GetToggleCommandState and r.GetToggleCommandState(40435) == 1)
+    local is_on = has_toggle_api and (r.FIP_GetTakeButtonToggleStateVal("", 0) == 1.0) or false
     if not is_on then r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('text_gray')) end
+    if not (has_toggle_api and has_action_api) then r.ImGui_BeginDisabled(ctx, true) end
     UI.StyledResetButton(ctx, label_text, 70, false, function()
         local mods = r.ImGui_GetKeyMods(ctx)
         local has_cmd = (mods & r.ImGui_Mod_Super()) ~= 0
         local has_ctrl = (mods & r.ImGui_Mod_Ctrl()) ~= 0
         local has_shift = (mods & r.ImGui_Mod_Shift()) ~= 0
         local has_alt = (mods & r.ImGui_Mod_Alt()) ~= 0
-        if has_alt then
-            r.Main_OnCommand(40643, 0)
-        elseif (has_cmd or has_ctrl) and has_shift then
-            r.Main_OnCommand(42635, 0)
-        elseif has_cmd or has_ctrl then
-            r.Main_OnCommand(40131, 0)
-        else
-            r.Main_OnCommand(40435, 0)
-        end
+        local mask = 0
+        if has_cmd or has_ctrl then mask = mask | 1 end
+        if has_shift then mask = mask | 2 end
+        if has_alt then mask = mask | 4 end
+        r.FIP_RunTakeButtonActionVal(tostring(mask), 0)
     end, false)
+    if not (has_toggle_api and has_action_api) then r.ImGui_EndDisabled(ctx) end
     if not is_on then r.ImGui_PopStyleColor(ctx, 1) end
     r.ImGui_SameLine(ctx, 0, 5)
     if #items == 1 then
-        local item = items[1]
-        if item and r.ValidatePtr(item, 'MediaItem*') then
-            local take_count = r.GetMediaItemNumTakes(item)
-            local active_index = 0
-            local active_take = r.GetActiveTake(item)
-            if active_take then
-                active_index = math.floor(r.GetMediaItemTakeInfo_Value(active_take, 'IP_TAKENUMBER'))
+        local can_edit_takes = has_count_api and has_index_api and has_names_api and has_set_api and has_shift_api
+        if can_edit_takes and type(take_count) == "number" and take_count > 0 and type(active_index) == "number" and active_index >= 0 then
+            local take_count_i = math.floor(take_count)
+            local active_index_i = math.floor(active_index)
+            local state = Core.GetState()
+            local sig = state.cached_items_sig or ""
+            local cache_key = sig .. ":" .. tostring(take_count_i)
+            local cache = Take._take_menu_cache
+            if cache.key ~= cache_key then
+                local names = {}
+                local raw = r.FIP_GetSingleSelectedItemTakeNamesStr("\n", 0) or ""
+                local idx = 0
+                if raw ~= "" then
+                    for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+                        if idx >= take_count_i then break end
+                        if line ~= "" then
+                            names[idx + 1] = tostring(idx + 1) .. ": " .. line
+                        else
+                            names[idx + 1] = tostring(idx + 1)
+                        end
+                        idx = idx + 1
+                    end
+                end
+                while idx < take_count_i do
+                    names[idx + 1] = tostring(idx + 1)
+                    idx = idx + 1
+                end
+                cache.key = cache_key
+                cache.names = names
             end
-            local names = {}
-            for i = 0, take_count - 1 do
-                local tk = r.GetMediaItemTake(item, i)
-                local nm = r.GetTakeName(tk)
-                names[#names + 1] = nm or ''
-            end
-            local items_str = table.concat(names, '\0') .. '\0'
+            local names = cache.names or {}
             r.ImGui_SetNextItemWidth(ctx, 120)
             r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), bar_color)
             r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), bar_color)
             r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgHovered(), bar_color)
             r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), bar_color)
-            local preview = names[active_index + 1] or ''
+            local preview = names[active_index_i + 1]
+            if type(preview) ~= "string" then preview = "" end
             UI.PushBlackText(ctx, use_black)
             local opened
             do
@@ -93,19 +109,16 @@ function Take.Render(ctx, items, props, UI, bar_color)
                 r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Header(), Theme.get('gray_58'))
                 r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderHovered(), Theme.get('gray_64'))
                 r.ImGui_PushStyleColor(ctx, r.ImGui_Col_HeaderActive(), Theme.get('gray_74'))
-                for i = 0, take_count - 1 do
-                    local sel = (i == active_index)
-                    if r.ImGui_Selectable(ctx, names[i + 1], sel) then
-                        local new_take = r.GetMediaItemTake(item, i)
-                        if new_take then
-                            Utils.with_undo('Select Take', function()
-                                r.SetActiveTake(new_take)
-                            end)
-                            local state = Core.GetState()
-                            state.cached_props = Core.GetAggregatedProps(items)
-                            Core.SetState(state)
-                            r.UpdateArrange()
-                        end
+                for i = 0, take_count_i - 1 do
+                    local sel = (i == active_index_i)
+                    local display_name = names[i + 1]
+                    if type(display_name) ~= "string" then display_name = "" end
+                    local label = display_name .. "##Take_" .. i
+                    if r.ImGui_Selectable(ctx, label, sel) then
+                        r.FIP_ApplySingleSelectedItemActiveTakeIndexVal(tostring(i), 0)
+                        local state = Core.GetState()
+                        state.cached_props = Core.GetAggregatedProps(items)
+                        Core.SetState(state)
                     end
                 end
                 r.ImGui_PopStyleColor(ctx, 4)
@@ -113,7 +126,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
             end
             r.ImGui_SameLine(ctx, 0, 4)
             UI.PushTransparentButtonStates(ctx, false)
-            local prev_disabled = (active_index <= 0)
+            local prev_disabled = (active_index_i <= 0)
             local prev_clicked
             if prev_disabled then
                 r.ImGui_BeginDisabled(ctx, true)
@@ -139,7 +152,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
             end
             UI.DrawHoverActiveOverlay(ctx)
             r.ImGui_SameLine(ctx, 0, 2)
-            local next_disabled = (active_index >= take_count - 1)
+            local next_disabled = (active_index_i >= take_count_i - 1)
             local next_clicked
             if next_disabled then
                 r.ImGui_BeginDisabled(ctx, true)
@@ -167,19 +180,10 @@ function Take.Render(ctx, items, props, UI, bar_color)
             r.ImGui_PopStyleColor(ctx, 3)
             if (prev_clicked and not prev_disabled) or (next_clicked and not next_disabled) then
                 local delta = prev_clicked and -1 or 1
-                local target_index = active_index + delta
-                if target_index < 0 then target_index = 0 end
-                if target_index >= take_count then target_index = take_count - 1 end
-                local new_take = r.GetMediaItemTake(item, target_index)
-                if new_take then
-                    Utils.with_undo('Select Take', function()
-                        r.SetActiveTake(new_take)
-                    end)
-                    local state = Core.GetState()
-                    state.cached_props = Core.GetAggregatedProps(items)
-                    Core.SetState(state)
-                    r.UpdateArrange()
-                end
+                r.FIP_ApplyShiftSingleSelectedItemActiveTakeVal(tostring(delta), 0)
+                local state = Core.GetState()
+                state.cached_props = Core.GetAggregatedProps(items)
+                Core.SetState(state)
             end
         end
     else

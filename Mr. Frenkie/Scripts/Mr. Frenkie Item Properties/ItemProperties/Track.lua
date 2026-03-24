@@ -29,8 +29,8 @@ end
 
 function Track.GetFreezeCountForTrack(track)
     if not track or not r.ValidatePtr(track, 'MediaTrack*') then return 0 end
-    local val = r.GetMediaTrackInfo_Value(track, 'I_FREEZECOUNT') or 0
-    return math.floor(val)
+    local val = r.FIP_GetTrackFreezeCountVal(track, "", 0)
+    return math.floor(val or 0)
 end
 
 function Track.GetFreezeStats(tracks)
@@ -62,63 +62,10 @@ end
 
 function Track.GetTotalFXLatency(track)
     if not track or not r.ValidatePtr(track, 'MediaTrack*') then return nil end
-    local total = 0
-    local has_latency = (r.TrackFX_GetLatency ~= nil)
-    local has_named = (r.TrackFX_GetNamedConfigParm ~= nil)
-    local fx_count = r.TrackFX_GetCount(track) or 0
-    for i = 0, fx_count - 1 do
-        local enabled = r.TrackFX_GetEnabled(track, i)
-        local offline = r.TrackFX_GetOffline(track, i)
-        if enabled and not offline then
-            local lat = 0
-            if has_latency then
-                lat = r.TrackFX_GetLatency(track, i) or 0
-            elseif has_named then
-                local ok, val = r.TrackFX_GetNamedConfigParm(track, i, 'pdc')
-                if ok and val then
-                    local tmp = tonumber(val)
-                    if tmp ~= nil then lat = tmp end
-                else
-                    local ok2, val2 = r.TrackFX_GetNamedConfigParm(track, i, 'latency')
-                    if ok2 and val2 then
-                        local tmp2 = tonumber(val2)
-                        if tmp2 ~= nil then lat = tmp2 end
-                    end
-                end
-            end
-            total = total + lat
-        end
+    if r.APIExists and r.APIExists("FIP_GetTrackPDCVal") then
+        return r.FIP_GetTrackPDCVal(track, "", 0)
     end
-    local rec_count = 0
-    local ok = pcall(function() rec_count = r.TrackFX_GetRecCount(track) or 0 end)
-    if ok and rec_count > 0 then
-        for i = 0, rec_count - 1 do
-            local idx = 0x1000000 + i
-            local enabled = r.TrackFX_GetEnabled(track, idx)
-            local offline = r.TrackFX_GetOffline(track, idx)
-            if enabled and not offline then
-                local lat = 0
-                if has_latency then
-                    lat = r.TrackFX_GetLatency(track, idx) or 0
-                elseif has_named then
-                    local ok3, val3 = r.TrackFX_GetNamedConfigParm(track, idx, 'pdc')
-                    if ok3 and val3 then
-                        local tmp3 = tonumber(val3)
-                        if tmp3 ~= nil then lat = tmp3 end
-                    else
-                        local ok4, val4 = r.TrackFX_GetNamedConfigParm(track, idx, 'latency')
-                        if ok4 and val4 then
-                            local tmp4 = tonumber(val4)
-                            if tmp4 ~= nil then lat = tmp4 end
-                        end
-                    end
-                end
-                total = total + lat
-            end
-        end
-    end
-    if total == 0 and not has_latency and not has_named then return nil end
-    return total
+    return nil
 end
 
 function Track.GetPerfInfo(track)
@@ -127,43 +74,60 @@ function Track.GetPerfInfo(track)
     }
 end
 
+local HP_FX_NAME = "JS: Mr. Frenkie/Low Cut 24 dB/oct"
+local LP_FX_NAME = "JS: Mr. Frenkie/High Cut 24 dB/oct"
+
 local function ensure_mt_front(track)
     if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
-    Utils.EnsureMIDITransposeUtilityInstalled()
-    local just_added = false
-    local fx_idx = nil
+    if not (r.APIExists and r.APIExists("FIP_EnsureMidiTransposeFront")) then return nil end
+    local idx = r.FIP_EnsureMidiTransposeFront(track, "", 0)
+    if idx == nil or idx < 0 then return nil end
+    return idx
+end
+
+local function find_fx_by_name(track, name)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
     local fx_cnt = r.TrackFX_GetCount(track) or 0
     for i = 0, fx_cnt - 1 do
-        local ok, name = r.TrackFX_GetFXName(track, i, "")
-        if ok and name and name:lower():find("midi transpose utility") then
-            fx_idx = i
-            break
+        local ok, fx_name = r.TrackFX_GetFXName(track, i, "")
+        if ok and fx_name and fx_name:find(name, 1, true) then
+            return i
         end
     end
-    if fx_idx == nil then
-        fx_idx = r.TrackFX_GetByName(track, "JS: Mr. Frenkie/MIDI Transpose Utility", false)
-        if fx_idx == -1 then
-            fx_idx = r.TrackFX_GetByName(track, "JS: MIDI Transpose Utility", false)
-        end
-        if fx_idx == -1 then
-            fx_idx = r.TrackFX_AddByName(track, "JS: Mr. Frenkie/MIDI Transpose Utility", false, 1)
-            if fx_idx == -1 then
-                fx_idx = r.TrackFX_AddByName(track, "JS: MIDI Transpose Utility", false, 1)
-            end
-            if fx_idx == -1 then return nil end
-            just_added = true
-        end
-    end
-    if fx_idx ~= 0 then
-        r.TrackFX_CopyToTrack(track, fx_idx, track, 0, true)
-        fx_idx = 0
-    end
-    if just_added then
-        Utils.ApplyMIDITransposePreset(track, fx_idx)
-        Utils.EnableEmbeddedUIMCP(track, fx_idx)
-    end
-    pcall(r.TrackFX_SetOpen, track, fx_idx, false)
-    return fx_idx
+    return nil
+end
+
+-- norm_when_create, slope_when_create: used only when adding NEW FX (no existing). When re-adding we read from existing.
+local function ensure_hp_only_at_end(track, norm_when_create, slope_when_create)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
+    if not (r.APIExists and r.APIExists("FIP_EnsureHPFilterOnly")) then return nil end
+    local norm = norm_when_create
+    local slope = slope_when_create
+    if norm == nil then norm = 0 end
+    if slope == nil then slope = 1 end
+    slope = slope and 1 or 0
+    local idx = r.FIP_EnsureHPFilterOnly(track, norm, slope, 0)
+    if idx == nil or idx < 0 then return nil end
+    return idx
+end
+
+local function ensure_lp_only_at_end(track, norm_when_create, slope_when_create)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return nil end
+    if not (r.APIExists and r.APIExists("FIP_EnsureLPFilterOnly")) then return nil end
+    local norm = norm_when_create
+    local slope = slope_when_create
+    if norm == nil then norm = 1 end
+    if slope == nil then slope = 1 end
+    slope = slope and 1 or 0
+    local idx = r.FIP_EnsureLPFilterOnly(track, norm, slope, 0)
+    if idx == nil or idx < 0 then return nil end
+    return idx
+end
+
+local function ensure_filters_at_end(track)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
+    if not (r.APIExists and r.APIExists("FIP_EnsureFiltersAtEnd")) then return end
+    r.FIP_EnsureFiltersAtEnd(track, "", 0)
 end
 
 local function find_transpose_param(track, fx_idx)
@@ -188,12 +152,92 @@ function Track.FindMidiTransposeFX(track)
     local fx_cnt = r.TrackFX_GetCount(track) or 0
     for i = 0, fx_cnt - 1 do
         local ok, name = r.TrackFX_GetFXName(track, i, "")
-        if ok and name and name:lower():find("midi transpose utility") then
-            return i
+        if ok and name then
+            local name_lower = name:lower()
+            if name_lower:find("midi transpose and monitor") or name_lower:find("midi transpose utility") then
+                return i
+            end
         end
     end
-    -- Only our utility is considered
     return nil
+end
+
+function Track.FindHPFilterFX(track)
+    return find_fx_by_name(track, "Low Cut 24")
+end
+
+function Track.FindLPFilterFX(track)
+    return find_fx_by_name(track, "High Cut 24")
+end
+
+function Track.EnsureFiltersAtEnd(track)
+    ensure_filters_at_end(track)
+end
+
+function Track.EnsureHPFilterOnly(track, norm_when_create, slope_when_create)
+    return ensure_hp_only_at_end(track, norm_when_create, slope_when_create)
+end
+
+function Track.EnsureLPFilterOnly(track, norm_when_create, slope_when_create)
+    return ensure_lp_only_at_end(track, norm_when_create, slope_when_create)
+end
+
+function Track.RemoveHPFilterFX(track)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
+    if r.APIExists and r.APIExists("FIP_RemoveHPFilterFX") then
+        r.FIP_RemoveHPFilterFX(track, "", 0)
+    end
+end
+
+function Track.RemoveLPFilterFX(track)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return end
+    if r.APIExists and r.APIExists("FIP_RemoveLPFilterFX") then
+        r.FIP_RemoveLPFilterFX(track, "", 0)
+    end
+end
+
+-- JSFX slider1: 20..20000 Hz with :log. GetParam returns inf; Normalized API for :log uses 0-1 in LOG space (same as our norm).
+local FILTER_HZ_MIN, FILTER_HZ_MAX = 20, 20000
+local FILTER_HZ_SPAN = FILTER_HZ_MAX - FILTER_HZ_MIN
+
+function Track.GetFilterFreqNorm(track, fx_idx)
+    if not track or fx_idx == nil or fx_idx < 0 then return nil end
+    local norm = r.TrackFX_GetParamNormalized(track, fx_idx, 0)
+    if norm == nil or norm ~= norm then return nil end -- nil or NaN
+    return math.max(0, math.min(1, norm))
+end
+
+function Track.SetFilterFreqNorm(track, fx_idx, norm)
+    if not track or fx_idx == nil or fx_idx < 0 then return end
+    norm = math.max(0, math.min(1, norm))
+    r.TrackFX_SetParamNormalized(track, fx_idx, 0, norm)
+end
+
+function Track.GetFilterSlope24(track, fx_idx)
+    if not track or fx_idx == nil or fx_idx < 0 then return nil end
+    local v = r.TrackFX_GetParam(track, fx_idx, 1)
+    return v ~= nil and v >= 0.5
+end
+
+function Track.SetFilterSlope24(track, fx_idx, is_24, freq_norm)
+    if not track or fx_idx == nil or fx_idx < 0 then return end
+    r.TrackFX_SetParam(track, fx_idx, 1, is_24 and 1 or 0)
+    if freq_norm ~= nil then
+        r.TrackFX_SetParamNormalized(track, fx_idx, 0, math.max(0, math.min(1, freq_norm)))
+    end
+end
+
+-- Standard DSP log scale: Hz = 20 * 1000^norm (20Hz to 20kHz)
+function Track.NormToFreq(norm)
+    if norm == nil then return 20 end
+    norm = math.max(0, math.min(1, norm))
+    return 20 * (1000 ^ norm)
+end
+
+function Track.FreqToNorm(freq)
+    if freq == nil or freq ~= freq or freq == math.huge or freq == -math.huge then return 0 end -- nil, NaN, inf
+    freq = math.max(20, math.min(20000, freq))
+    return math.log(freq / 20) / math.log(1000)
 end
 
 function Track.GetMidiTransposeValue(track)
@@ -289,9 +333,8 @@ function Track.RemoveMidiTransposeFX(tracks)
     Utils.with_undo("Remove MIDI Transpose", function()
         for _, tr in ipairs(tracks) do
             if tr and r.ValidatePtr(tr, "MediaTrack*") then
-                local fx_idx = Track.FindMidiTransposeFX(tr)
-                if fx_idx ~= nil then
-                    pcall(r.TrackFX_Delete, tr, fx_idx)
+                if r.APIExists and r.APIExists("FIP_RemoveMidiTransposeFX") then
+                    r.FIP_RemoveMidiTransposeFX(tr, "", 0)
                 end
             end
         end
