@@ -12,8 +12,24 @@ local Fader = require('Fader')
 local Utils = require('Utils')
 local Track = require('Track')
 local Item = require('Item')
+local JSFX = require('jsfx')
 
- 
+local function ensure_jsfx_installed()
+    if not (r.APIExists and r.APIExists("FIP_EnsureJSFXFileStr")) then return end
+    r.FIP_EnsureJSFXFileStr("MIDI Transpose and Monitor.jsfx", JSFX.MIDI_TRANSPOSE_UTILITY_JSFX, 0)
+    r.FIP_EnsureJSFXFileStr("Low Cut 24 dB oct.jsfx", JSFX.LOW_CUT_24DB_JSFX, 0)
+    r.FIP_EnsureJSFXFileStr("High Cut 24 dB oct.jsfx", JSFX.HIGH_CUT_24DB_JSFX, 0)
+    if r.APIExists("FIP_EnsureJSFXPresetStr") then
+        r.FIP_EnsureJSFXPresetStr("js-Mr_ Frenkie_Low Cut 24 dB oct_jsfx.ini", JSFX.PRESET_LOW_CUT_24_EMBEDDED, 0)
+        r.FIP_EnsureJSFXPresetStr("js-Mr_ Frenkie_High Cut 24 dB oct_jsfx.ini", JSFX.PRESET_HIGH_CUT_24_EMBEDDED, 0)
+    end
+    if r.APIExists("FIP_SetMidiTransposePresetStr") then
+        r.FIP_SetMidiTransposePresetStr(JSFX.MIDI_TRANSPOSE_UTILITY_PRESET_INI, 0)
+    end
+end
+
+ensure_jsfx_installed()
+
 local initial_state = core.GetState()
 if not initial_state.cached_items then
     initial_state.cached_items = {}
