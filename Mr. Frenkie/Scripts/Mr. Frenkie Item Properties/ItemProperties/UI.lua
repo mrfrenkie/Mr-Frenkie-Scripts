@@ -424,7 +424,7 @@ local function Main()
                 state._items_proj_cc = proj_cc
                 state.cache_time = r.time_precise()
                 core.SetState(state)
-                core.DebugAggregated(items, state.cached_props)
+
             end
         end
         if items_count > 0 and not state.prefer_track_context then
@@ -435,7 +435,7 @@ local function Main()
                 state.last_update_time = now
                 state.cache_time = now
                 core.SetState(state)
-                core.DebugAggregated(items, state.cached_props)
+
             end
         end
 

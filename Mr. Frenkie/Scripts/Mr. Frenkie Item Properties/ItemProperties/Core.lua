@@ -35,39 +35,6 @@ local manual_context_prefer_track = false -- when override: true = Track, false 
 
 local ItemPropsCore = {}
 
-local _debug_last_str = nil
-
-function ItemPropsCore.IsDebugEnabled()
-    local val = r.GetExtState("Frenkie_Inspector", "DebugLog")
-    return val == "1"
-end
-
-function ItemPropsCore.Log(msg)
-    if ItemPropsCore.IsDebugEnabled() then
-        r.ShowConsoleMsg(msg .. "\n")
-    end
-end
-
-function ItemPropsCore.DebugAggregated(items, aggregated)
-    if not ItemPropsCore.IsDebugEnabled() then return end
-    if not (r.APIExists and r.APIExists("FIP_GetAggregatedPropsStateStr")) then
-        r.ShowConsoleMsg("UI: FIP Aggregated — API missing\n")
-        _debug_last_str = nil
-        return
-    end
-    local raw_state = r.FIP_GetAggregatedPropsStateStr("", 0) or ""
-    if raw_state == "" then
-        r.ShowConsoleMsg("UI: FIP Aggregated — no items selected\n")
-        _debug_last_str = nil
-        return
-    end
-    local count = aggregated and aggregated.sel_item_count or 0
-    local msg = string.format("UI: FIP Aggregated (%d items) — %s\n", count, raw_state)
-    if msg ~= _debug_last_str then
-        r.ShowConsoleMsg(msg)
-        _debug_last_str = msg
-    end
-end
 
 function ItemPropsCore.CheckExtensions()
     if not r.JS_ReaScriptAPI_Version then
