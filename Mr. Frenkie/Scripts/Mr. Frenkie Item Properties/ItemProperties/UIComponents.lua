@@ -365,14 +365,16 @@ function UIComponents.FreqBox(ctx, id, norm, width, color, inverted, display_fn,
             new_norm = state.start + delta_norm
             if new_norm < 0 then new_norm = 0 end
             if new_norm > 1 then new_norm = 1 end
-            changed = true  -- always report during drag so host/JSFX get updated every frame
+            if math.abs(new_norm - norm) > 1e-7 then
+                changed = true
+            end
         end
     end
     if deactivated then
         _freqbox_drag_state[id] = nil
     end
     UIComponents.DrawHoverActiveOverlay(ctx)
-    return changed, new_norm, activated
+    return changed, new_norm, activated, deactivated
 end
 
 -- FreqBoxHz: works with Hz directly, logarithmic drag behavior
@@ -712,7 +714,7 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
     elseif item_deactivated and not mouse_down then
         deactivated = true
     end
-    return changed, new_value, deactivated
+    return changed, new_value, deactivated, activated
 end
 
 

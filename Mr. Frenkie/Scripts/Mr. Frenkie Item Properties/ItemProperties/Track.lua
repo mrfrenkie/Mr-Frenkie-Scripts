@@ -341,4 +341,31 @@ function Track.RemoveMidiTransposeFX(tracks)
     end)
 end
 
+-- Phase-based API wrappers (undo managed in C++)
+-- phase: 0=begin, 1=tick, 2=end, 3=click (atomic)
+
+function Track.FilterEdit(track, type, norm, slope, phase)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return -1 end
+    if not (r.APIExists and r.APIExists("FIP_FilterEdit")) then return -1 end
+    return r.FIP_FilterEdit(track, type, norm, slope and 1.0 or 0.0, phase)
+end
+
+function Track.FilterRemove(track, type, phase)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return 0 end
+    if not (r.APIExists and r.APIExists("FIP_FilterRemove")) then return 0 end
+    return r.FIP_FilterRemove(track, type, phase)
+end
+
+function Track.MidiTransposeEdit(track, semitones, phase)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return -1 end
+    if not (r.APIExists and r.APIExists("FIP_MidiTransposeEdit")) then return -1 end
+    return r.FIP_MidiTransposeEdit(track, semitones, phase)
+end
+
+function Track.MidiTransposeRemove(track, phase)
+    if not track or not r.ValidatePtr(track, "MediaTrack*") then return 0 end
+    if not (r.APIExists and r.APIExists("FIP_MidiTransposeRemove")) then return 0 end
+    return r.FIP_MidiTransposeRemove(track, phase)
+end
+
 return Track

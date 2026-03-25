@@ -569,21 +569,33 @@ local function Main()
                 end
                 local mt_label = 'MIDI Input:'
                 local mt_label_w = select(1, r.ImGui_CalcTextSize(ctx, mt_label))
-                local mt_changed, mt_new, mt_deactivated = UI.VerticalPitchControl(ctx, mt_label, current_val, 50, 0.1, -48, 48, '%.0f st', function()
+                local mt_changed, mt_new, mt_deactivated, mt_activated = UI.VerticalPitchControl(ctx, mt_label, current_val, 50, 0.1, -48, 48, '%.0f st', function()
                     if single_track then
                         local fx_idx = Track.FindMidiTransposeFX(single_track)
                         if fx_idx ~= nil then
-                            Track.RemoveMidiTransposeFX({ single_track })
+                            Track.MidiTransposeRemove(single_track, 3)
                         else
-                            Track.SetMidiTransposeAbsolute({ single_track }, 0)
+                            Track.MidiTransposeEdit(single_track, 0, 3)
                         end
                     end
                 end, mt_label_w + 8, nil, has_mt_fx, nil, nil, true, true)
-                if mt_changed and single_track then
-                    Track.UpdateMidiTransposeImmediate({ single_track }, mt_new)
-                end
-                if mt_deactivated and single_track then
-                    Track.FinalizeMidiTranspose()
+                if single_track then
+                    -- activated: begin session only if FX exists
+                    if mt_activated and has_mt_fx then
+                        Track.MidiTransposeEdit(single_track, mt_new, 0)
+                    end
+                    -- changed: tick, or create FX on first meaningful drag
+                    if mt_changed and not mt_activated then
+                        if not has_mt_fx then
+                            Track.MidiTransposeEdit(single_track, mt_new, 0)
+                        else
+                            Track.MidiTransposeEdit(single_track, mt_new, 1)
+                        end
+                    end
+                    -- deactivated: end session (only if session was started)
+                    if mt_deactivated and (has_mt_fx or mt_changed) then
+                        Track.MidiTransposeEdit(single_track, mt_new, 2)
+                    end
                 end
                 UI.Separator(ctx)
                 -- HP/LP filters: one row, thin font, compact; width = content only (no extra space after LP)
@@ -641,74 +653,73 @@ local function Main()
                     end
                     local function hp_display_fn(norm) return format_freq_display(Track.NormToFreq(norm)) end
                     local function lp_display_fn(norm) return format_freq_display(Track.NormToFreq(norm)) end
-                    -- HP: label (slope) + numeric box "20k"/"1k"/"999 Hz", left-mouse drag
+                    -- HP: label (slope) + numeric box, phase-based undo via C++
                     r.ImGui_PushID(ctx, "HP")
                     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('text_white_soft'))
                     UI.StyledButton(ctx, hp_label .. "##HP", 32, function()
-                        if hp_idx == nil then
-                            Track.EnsureHPFilterOnly(single_track, hp_norm, not hp_24)
-                            hp_idx = Track.FindHPFilterFX(single_track)
-                        end
-                        if hp_idx ~= nil then
-                            Track.SetFilterSlope24(single_track, hp_idx, not hp_24, hp_norm)
-                        end
+                        Track.FilterEdit(single_track, 0, hp_norm, not hp_24, 3)
                     end)
                     r.ImGui_PopStyleColor(ctx, 1)
                     r.ImGui_SameLine(ctx, 0, 2)
                     r.ImGui_Text(ctx, ":")
                     r.ImGui_SameLine(ctx, 0, 4)
-                    local hp_changed, hp_new_norm, hp_activated = UI.FreqBox(ctx, "##HPFreq", hp_norm, freq_box_w, freq_norm_to_color(hp_norm), false, hp_display_fn, 0)
-                    if hp_activated and hp_idx == nil then
-                        Track.EnsureHPFilterOnly(single_track, hp_norm, hp_24)
-                        hp_idx = Track.FindHPFilterFX(single_track)
+                    local hp_changed, hp_new_norm, hp_activated, hp_deactivated = UI.FreqBox(ctx, "##HPFreq", hp_norm, freq_box_w, freq_norm_to_color(hp_norm), false, hp_display_fn, 0)
+                    if hp_activated and hp_changed and hp_idx ~= nil then
+                        -- Double-click reset: atomic remove (HP reset = 20Hz = off)
+                        Track.FilterRemove(single_track, 0, 3)
+                    elseif hp_activated and hp_idx ~= nil then
+                        -- Begin drag session for existing FX
+                        Track.FilterEdit(single_track, 0, hp_norm, hp_24, 0)
                     end
-                    if hp_changed then
+                    if hp_changed and not hp_activated then
                         local hp_new_freq = Track.NormToFreq(hp_new_norm)
-                        hp_new_freq = math.max(20, math.min(fmax, hp_new_freq))
-                        if hp_new_freq <= 20 and hp_idx ~= nil then
-                            Track.RemoveHPFilterFX(single_track)
-                            hp_idx = nil
-                        elseif hp_idx == nil and hp_new_freq > 20 then
-                            Track.EnsureHPFilterOnly(single_track, hp_new_norm, hp_24)
-                            hp_idx = Track.FindHPFilterFX(single_track)
+                        if hp_idx == nil and hp_new_freq > 20 then
+                            Track.FilterEdit(single_track, 0, hp_new_norm, hp_24, 0)
                         elseif hp_idx ~= nil then
-                            Track.SetFilterFreqNorm(single_track, hp_idx, hp_new_norm)
+                            Track.FilterEdit(single_track, 0, hp_new_norm, hp_24, 1)
+                        end
+                    end
+                    if hp_deactivated and hp_idx ~= nil and not (hp_activated and hp_changed) then
+                        local hp_end_freq = Track.NormToFreq(hp_new_norm)
+                        if hp_end_freq <= 20 then
+                            Track.FilterRemove(single_track, 0, 2)
+                        else
+                            Track.FilterEdit(single_track, 0, hp_new_norm, hp_24, 2)
                         end
                     end
                     r.ImGui_PopID(ctx)
-                    -- LP: same numeric box, inverted drag (left = lower cutoff)
+                    -- LP: same pattern, inverted boundary (20kHz = off)
                     r.ImGui_SameLine(ctx, 0, 8)
                     r.ImGui_PushID(ctx, "LP")
                     r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('text_white_soft'))
                     UI.StyledButton(ctx, lp_label .. "##LP", 32, function()
-                        if lp_idx == nil then
-                            Track.EnsureLPFilterOnly(single_track, lp_norm, not lp_24)
-                            lp_idx = Track.FindLPFilterFX(single_track)
-                        end
-                        if lp_idx ~= nil then
-                            Track.SetFilterSlope24(single_track, lp_idx, not lp_24, lp_norm)
-                        end
+                        Track.FilterEdit(single_track, 1, lp_norm, not lp_24, 3)
                     end)
                     r.ImGui_PopStyleColor(ctx, 1)
                     r.ImGui_SameLine(ctx, 0, 2)
                     r.ImGui_Text(ctx, ":")
                     r.ImGui_SameLine(ctx, 0, 4)
-                    local lp_changed, lp_new_norm, lp_activated = UI.FreqBox(ctx, "##LPFreq", lp_norm, freq_box_w, freq_norm_to_color(lp_norm), true, lp_display_fn, 1)
-                    if lp_activated and lp_idx == nil then
-                        Track.EnsureLPFilterOnly(single_track, lp_norm, lp_24)
-                        lp_idx = Track.FindLPFilterFX(single_track)
+                    local lp_changed, lp_new_norm, lp_activated, lp_deactivated = UI.FreqBox(ctx, "##LPFreq", lp_norm, freq_box_w, freq_norm_to_color(lp_norm), true, lp_display_fn, 1)
+                    if lp_activated and lp_changed and lp_idx ~= nil then
+                        -- Double-click reset: atomic remove (LP reset = 20kHz = off)
+                        Track.FilterRemove(single_track, 1, 3)
+                    elseif lp_activated and lp_idx ~= nil then
+                        Track.FilterEdit(single_track, 1, lp_norm, lp_24, 0)
                     end
-                    if lp_changed then
+                    if lp_changed and not lp_activated then
                         local lp_new_freq = Track.NormToFreq(lp_new_norm)
-                        lp_new_freq = math.max(20, math.min(fmax, lp_new_freq))
-                        if lp_new_freq >= fmax and lp_idx ~= nil then
-                            Track.RemoveLPFilterFX(single_track)
-                            lp_idx = nil
-                        elseif lp_idx == nil and lp_new_freq < fmax then
-                            Track.EnsureLPFilterOnly(single_track, lp_new_norm, lp_24)
-                            lp_idx = Track.FindLPFilterFX(single_track)
+                        if lp_idx == nil and lp_new_freq < fmax then
+                            Track.FilterEdit(single_track, 1, lp_new_norm, lp_24, 0)
                         elseif lp_idx ~= nil then
-                            Track.SetFilterFreqNorm(single_track, lp_idx, lp_new_norm)
+                            Track.FilterEdit(single_track, 1, lp_new_norm, lp_24, 1)
+                        end
+                    end
+                    if lp_deactivated and lp_idx ~= nil and not (lp_activated and lp_changed) then
+                        local lp_end_freq = Track.NormToFreq(lp_new_norm)
+                        if lp_end_freq >= fmax then
+                            Track.FilterRemove(single_track, 1, 2)
+                        else
+                            Track.FilterEdit(single_track, 1, lp_new_norm, lp_24, 2)
                         end
                     end
                     r.ImGui_PopID(ctx)
