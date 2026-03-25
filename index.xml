@@ -172,8 +172,10 @@
         <source type="extension" platform="darwin-arm64" file="reaper_frenkie_core.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Extensions/FRENKIE%20CORE/build/reaper_frenkie_core.dylib</source>
         <changelog><![CDATA[Frenkie Item Properties 3
 
-- Fixed issues in Item Properties v.3.
-- Stability improvements.]]></changelog>
+- Most complex logic has been moved to a C++ extension.
+- Added fast HP and LP filters for Track mode.
+- Added a chord monitor and MIDI transpose for Track mode.
+- Item Pitch (Item context) can now transpose MIDI inside MIDI items. This is toggled in REAPER settings.]]></changelog>
       </version>
       <metadata>
         <link rel="website">https://github.com/mrfrenkie/Mr-Frenkie-Scripts</link>
