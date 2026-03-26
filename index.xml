@@ -183,6 +183,15 @@
       </metadata>
     </reapack>
     <reapack name="Transient Detector (Frenkie)" type="extension" desc="Transient Detector (Frenkie)">
+      <version name="1.1" author="Mr. Frenkie" time="2026-03-26T12:00:00Z">
+        <source platform="darwin-arm64" file="reaper_frenkie_TransientDetector.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_new/reaper_frenkie_TransientDetector.dylib</source>
+        <source platform="win64" file="reaper_frenkie_TransientDetector.dll">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_win/reaper_frenkie_TransientDetector.dll</source>
+        <source type="script" main="main" file="Audio Editing/Transient Detector/Frenkie Transient Detector UI.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Audio%20Editing/Transient%20Detector/Frenkie%20Transient%20Detector%20UI.lua</source>
+        <changelog><![CDATA[Version 1.1:
+
+- Added transient GUID extraction
+- Fixed the Windows build]]></changelog>
+      </version>
       <version name="1.0beta2" author="Mr. Frenkie" time="2026-03-24T12:00:00Z">
         <source platform="darwin-arm64" file="reaper_frenkie_TransientDetector.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_new/reaper_frenkie_TransientDetector.dylib</source>
         <source platform="win64" file="reaper_frenkie_TransientDetector.dll">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Scripts/Frenkie%20Transient%20Slip/TRANSIENT%20DETECTOR%20EXTENSION/build_win/reaper_frenkie_TransientDetector.dll</source>
