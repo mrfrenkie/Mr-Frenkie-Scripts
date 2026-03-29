@@ -160,16 +160,6 @@ function ItemPropsPitch.CheckSelectionChange(items)
     return false
 end
 
-function ItemPropsPitch.ClearState()
-    transpose_drag_active = false
-    transpose_drag_start = 0
-    transpose_drag_last = 0
-    ItemPropsPitch._last_items_sig = nil
-    ItemPropsPitch._sel_tracks_pitch_cache = { sig = "", proj_cc = -1, stats = nil }
-    ItemPropsPitch.ResetAccumulatedPitch()
-    ItemPropsPitch.ResetSelectedTracksItemsPitchDelta()
-end
-
 function ItemPropsPitch.ResetPitch(items)
     Utils.with_undo("Reset Pitch", function()
         if r.APIExists and r.APIExists("FIP_SetSelectedItemsPitch") then

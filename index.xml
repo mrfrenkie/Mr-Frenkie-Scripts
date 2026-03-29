@@ -131,7 +131,7 @@
 - Context handling (Item/Track): More reliable; click events are no longer missed
 - Several bug fixes]]></changelog>
       </version>
-      <version name="3.0.2" author="Mr. Frenkie" time="2026-03-26T12:30:00Z">
+      <version name="3.0.3" author="Mr. Frenkie" time="2026-03-26T12:30:00Z">
         <source main="main" file="Mr. Frenkie Item Properties/Frenkie Item Properties.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/Frenkie%20Item%20Properties.lua</source>
         <source file="Mr. Frenkie Item Properties/ItemProperties/Core.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/ItemProperties/Core.lua</source>
         <source file="Mr. Frenkie Item Properties/ItemProperties/Fader.lua">https://raw.githubusercontent.com/mrfrenkie/Mr-Frenkie-Scripts/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/ItemProperties/Fader.lua</source>
@@ -171,14 +171,14 @@
         <source file="Mr. Frenkie Item Properties/ItemProperties/jsfx.lua">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Scripts/Mr.%20Frenkie%20Item%20Properties/ItemProperties/jsfx.lua</source>
         <source type="extension" platform="darwin-arm64" file="reaper_frenkie_core.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Extensions/FRENKIE%20CORE/build/reaper_frenkie_core.dylib</source>
         <source type="extension" platform="darwin64" file="reaper_frenkie_core.dylib">https://github.com/mrfrenkie/Mr-Frenkie-Scripts/raw/master/Mr.%20Frenkie/Extensions/FRENKIE%20CORE/build/reaper_frenkie_core.dylib</source>
-        <changelog><![CDATA[Frenkie Item Properties 3.0.2
+        <changelog><![CDATA[Frenkie Item Properties 3.0.3
 
 - Most complex logic has been moved to a C++ extension.
 - Added fast HP and LP filters for Track mode.
 - Added a chord monitor and MIDI transpose for Track mode.
 - Item Pitch (Item context) can now transpose MIDI inside MIDI items. This is toggled in REAPER settings.
-- Fixed a macOS issue where Item Properties could fail on startup because Pitch.ClearState was missing.
-- Fixed the macOS ReaPack package so universal reaper_frenkie_core.dylib is published for both Apple Silicon and Intel Macs.]]></changelog>
+- Fixed the macOS ReaPack package so universal reaper_frenkie_core.dylib is published for both Apple Silicon and Intel Macs.
+- Re-published the complete verified macOS plugin bundle from the working local installation.]]></changelog>
       </version>
       <metadata>
         <link rel="website">https://github.com/mrfrenkie/Mr-Frenkie-Scripts</link>
