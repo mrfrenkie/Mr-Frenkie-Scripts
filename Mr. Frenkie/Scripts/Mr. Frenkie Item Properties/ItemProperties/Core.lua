@@ -34,6 +34,24 @@ local manual_context_override = false   -- true = user switched context via righ
 local manual_context_prefer_track = false -- when override: true = Track, false = Item
 
 local ItemPropsCore = {}
+local REQUIRED_FIP_APIS = {
+    "FIP_EnsureJSFXFileStr",
+    "FIP_GetTrackFreezeCountVal",
+    "FIP_GetTrackPDCVal",
+    "FIP_EnsureMidiTransposeFront",
+    "FIP_EnsureHPFilterOnly",
+    "FIP_EnsureLPFilterOnly",
+    "FIP_EnsureFiltersAtEnd",
+    "FIP_RemoveHPFilterFX",
+    "FIP_RemoveLPFilterFX",
+    "FIP_GetSelectedTracksItemsPitchStatsStr",
+    "FIP_AddSelectedTracksItemsPitchVal",
+    "FIP_ResetSelectedTracksItemsPitchVal",
+    "FIP_SetSelectedItemsPlaybackRate",
+    "FIP_SetSelectedItemsPitch",
+    "FIP_ApplyAddSelectedItemsPitchDeltaVal",
+    "FIP_GetAggregatedPitch",
+}
 
 
 function ItemPropsCore.CheckExtensions()
@@ -48,6 +66,16 @@ function ItemPropsCore.CheckExtensions()
     if not r.BR_GetMouseCursorContext then
         r.ShowMessageBox("SWS extension is required for this script.", "Missing Extension", 0)
         return false
+    end
+    for _, api_name in ipairs(REQUIRED_FIP_APIS) do
+        if not (r.APIExists and r.APIExists(api_name)) then
+            r.ShowMessageBox(
+                "Installed reaper_frenkie_core.dylib is missing required API: " .. api_name .. "\n\nReinstall the latest Frenkie Item Properties package from ReaPack.",
+                "Outdated Frenkie Core",
+                0
+            )
+            return false
+        end
     end
     return true
 end
