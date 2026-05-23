@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
@@ -30,7 +31,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
         active_display = math.floor(active_index) + 1
         label_text = string.format('Take %d/%d', active_display, total_takes)
     end
-    local _, use_black = UI.GetBarColorAndUseBlack(items, {}, props)
+    local _, _, _, _, _, bar_fg = UI.GetBarColorAndUseBlack(items, {}, props)
     if not label_text:match(":$") then
         label_text = label_text .. ":"
     end
@@ -49,6 +50,9 @@ function Take.Render(ctx, items, props, UI, bar_color)
         if has_alt then mask = mask | 4 end
         r.FIP_RunTakeButtonActionVal(tostring(mask), 0)
     end, false)
+    if has_toggle_api and has_action_api then
+        UI.QueueStyledTooltipDelayed(ctx, 'fip_take_tcp', UI.GetTakeTcpMirrorTooltipLines(), 1.0)
+    end
     if not (has_toggle_api and has_action_api) then r.ImGui_EndDisabled(ctx) end
     if not is_on then r.ImGui_PopStyleColor(ctx, 1) end
     r.ImGui_SameLine(ctx, 0, 5)
@@ -91,7 +95,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
             r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), bar_color)
             local preview = names[active_index_i + 1]
             if type(preview) ~= "string" then preview = "" end
-            UI.PushBlackText(ctx, use_black)
+            UI.PushBarForegroundText(ctx, bar_fg)
             local opened
             do
                 local ok_flag, no_arrow = pcall(r.ImGui_ComboFlags_NoArrowButton)
@@ -101,7 +105,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
                     opened = r.ImGui_BeginCombo(ctx, '##TakeSelectInline', preview)
                 end
             end
-            UI.PopBlackText(ctx, use_black)
+            UI.PopBarForegroundText(ctx)
             UI.DrawHoverActiveOverlay(ctx)
             r.ImGui_PopStyleColor(ctx, 4)
             if opened then
@@ -124,6 +128,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
                 r.ImGui_PopStyleColor(ctx, 4)
                 r.ImGui_EndCombo(ctx)
             end
+            UI.QueueStyledTooltipDelayed(ctx, 'fip_take_combo', UI.GetTakePickerTooltipLines(), 1.0)
             r.ImGui_SameLine(ctx, 0, 4)
             UI.PushTransparentButtonStates(ctx, false)
             local prev_disabled = (active_index_i <= 0)
@@ -151,6 +156,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
                 end
             end
             UI.DrawHoverActiveOverlay(ctx)
+            UI.QueueStyledTooltipDelayed(ctx, 'fip_take_prev', UI.GetTakePickerTooltipLines(), 1.0)
             r.ImGui_SameLine(ctx, 0, 2)
             local next_disabled = (active_index_i >= take_count_i - 1)
             local next_clicked
@@ -177,6 +183,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
                 end
             end
             UI.DrawHoverActiveOverlay(ctx)
+            UI.QueueStyledTooltipDelayed(ctx, 'fip_take_next', UI.GetTakePickerTooltipLines(), 1.0)
             r.ImGui_PopStyleColor(ctx, 3)
             if (prev_clicked and not prev_disabled) or (next_clicked and not next_disabled) then
                 local delta = prev_clicked and -1 or 1
@@ -194,7 +201,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
         r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBgActive(), bar_color)
         r.ImGui_BeginDisabled(ctx, true)
         local preview_multi = 'Только для одного объекта'
-        UI.PushBlackText(ctx, use_black)
+        UI.PushBarForegroundText(ctx, bar_fg)
         local opened_multi
         do
             local ok_flag2, no_arrow2 = pcall(r.ImGui_ComboFlags_NoArrowButton)
@@ -204,7 +211,7 @@ function Take.Render(ctx, items, props, UI, bar_color)
                 opened_multi = r.ImGui_BeginCombo(ctx, '##TakeSelectInline', preview_multi)
             end
         end
-        UI.PopBlackText(ctx, use_black)
+        UI.PopBarForegroundText(ctx)
         if opened_multi then r.ImGui_EndCombo(ctx) end
         r.ImGui_EndDisabled(ctx)
         r.ImGui_PopStyleColor(ctx, 4)

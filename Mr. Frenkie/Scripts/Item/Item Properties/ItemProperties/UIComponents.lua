@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local script_path = debug.getinfo(1, "S").source:match("@(.*)")
@@ -7,10 +8,121 @@ local Theme = require("Theme")
 local Utils = require("Utils")
 
 local UIComponents = {}
+
+local ITEM_INFO_PROPERTIES_ACTION = 40009
+local STYLED_TOOLTIP_DELAY_DEFAULT = 1.0
+
 local _hover_timers = {}
-local _pending_tooltip_text = nil
+local _pending_tooltip_lines = nil
 local _italic_font = nil
 local _agg_region = nil
+local _tooltip_font = nil
+local _tooltip_font_size = 13
+local _styled_tt_hover_start = {}
+local _styled_tt_hover_last_pos = {}
+
+local function split_tooltip_lines(text)
+    if not text or text == '' then return {} end
+    local lines = {}
+    local pos = 1
+    local len = #text
+    while pos <= len do
+        local idx = string.find(text, '\n', pos, true)
+        if not idx then
+            lines[#lines + 1] = string.sub(text, pos)
+            break
+        end
+        lines[#lines + 1] = string.sub(text, pos, idx - 1)
+        pos = idx + 1
+    end
+    return lines
+end
+
+local function is_mac_os()
+    local os_str = r.GetOS() or ''
+    local low = os_str:lower()
+    if low ~= '' and low:find('win', 1, true) then
+        return false
+    end
+    if low:find('darwin', 1, true)
+        or low:find('osx', 1, true)
+        or low:find('macos', 1, true)
+        or low:find('mac os', 1, true) then
+        return true
+    end
+    local ot = (os.getenv('OSTYPE') or ''):lower()
+    return ot:find('darwin', 1, true) ~= nil
+end
+
+local function is_windows_os()
+    local os_str = r.GetOS()
+    return os_str and os_str ~= '' and os_str:lower():find('win', 1, true) ~= nil
+end
+
+local function render_styled_tooltip_lines(ctx, lines)
+    local color_count = 0
+    local var_count = 0
+    local font_pushed = false
+    local tooltip_round = 8.0
+    if _tooltip_font and r.ImGui_PushFont then
+        local sz = math.max(10, math.floor((_tooltip_font_size or 13) * 0.85 + 0.5))
+        font_pushed = pcall(r.ImGui_PushFont, ctx, _tooltip_font, sz)
+        if not font_pushed then
+            font_pushed = pcall(r.ImGui_PushFont, ctx, _tooltip_font)
+        end
+    end
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_PopupBg(), Theme.get('tooltip_bg'))
+    color_count = color_count + 1
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), Theme.get('tooltip_border'))
+    color_count = color_count + 1
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('tooltip_text'))
+    color_count = color_count + 1
+    if r.ImGui_StyleVar_WindowRounding then
+        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowRounding(), tooltip_round)
+        var_count = var_count + 1
+    end
+    if r.ImGui_StyleVar_PopupRounding then
+        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_PopupRounding(), tooltip_round)
+        var_count = var_count + 1
+    end
+    if r.ImGui_StyleVar_WindowBorderSize then
+        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_WindowBorderSize(), 0.0)
+        var_count = var_count + 1
+    end
+    if r.ImGui_StyleVar_PopupBorderSize then
+        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_PopupBorderSize(), 0.0)
+        var_count = var_count + 1
+    end
+    local ok_tt = pcall(r.ImGui_BeginTooltip, ctx)
+    if ok_tt then
+        for _, line in ipairs(lines or {}) do
+            if line ~= nil then
+                if type(line) == 'table' and line.text ~= nil then
+                    local col = line.color or Theme.get('tooltip_text')
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), col)
+                    r.ImGui_Text(ctx, line.text)
+                    r.ImGui_PopStyleColor(ctx, 1)
+                else
+                    r.ImGui_Text(ctx, line)
+                end
+            end
+        end
+        r.ImGui_EndTooltip(ctx)
+    else
+        local plain = {}
+        for _, line in ipairs(lines or {}) do
+            if type(line) == 'table' and line.text ~= nil then
+                plain[#plain + 1] = line.text
+            elseif type(line) == 'string' then
+                plain[#plain + 1] = line
+            end
+        end
+        r.ImGui_SetTooltip(ctx, table.concat(plain, '\n'))
+    end
+    if var_count > 0 then r.ImGui_PopStyleVar(ctx, var_count) end
+    if color_count > 0 then r.ImGui_PopStyleColor(ctx, color_count) end
+    if font_pushed and r.ImGui_PopFont then pcall(r.ImGui_PopFont, ctx) end
+end
 
 local function _srgb_lin(c)
     local s = c / 255.0
@@ -18,9 +130,79 @@ local function _srgb_lin(c)
     return ((s + 0.055) / 1.055) ^ 2.4
 end
 
-function UIComponents.ShouldUseBlackText(r_val, g_val, b_val)
-    local L = 0.2126 * _srgb_lin(r_val) + 0.7152 * _srgb_lin(g_val) + 0.0722 * _srgb_lin(b_val)
-    return L >= 0.179
+local function norm_bar_rgb255(rr, gg, bb)
+    local function q(v, dflt)
+        v = tonumber(v) or dflt or 64
+        v = math.floor(v + 0.5)
+        if v < 0 then return 0 end
+        if v > 255 then return 255 end
+        return v
+    end
+    return q(rr, 64), q(gg, 64), q(bb, 64)
+end
+
+-- WCAG 2 contrast ratio for relative luminances L in 0..1
+local function wcag_cr(Lbg, Lfg)
+    local a = math.max(Lbg, Lfg) + 0.05
+    local b = math.min(Lbg, Lfg) + 0.05
+    return a / b
+end
+
+-- Returns ImGui foreground u32 plus whether the choice is dark ink (black vs light text).
+function UIComponents.BarForegroundPick(rr, gg, bb)
+    rr, gg, bb = norm_bar_rgb255(rr, gg, bb)
+    local function L255(r, g, b)
+        return 0.2126 * _srgb_lin(r) + 0.7152 * _srgb_lin(g) + 0.0722 * _srgb_lin(b)
+    end
+    local Lbg = L255(rr, gg, bb)
+    local cands = {
+        { Theme.get('black'), L255(0, 0, 0), true },
+        { Theme.get('text_white_soft'), L255(220, 220, 220), false },
+        { Theme.rgba(255, 255, 255, 255), L255(255, 255, 255), false },
+    }
+    local min_aa = 4.5
+    local best_u, best_cr, best_dark = nil, nil, nil
+    for _, tri in ipairs(cands) do
+        local crt = wcag_cr(Lbg, tri[2])
+        if crt >= min_aa and (best_cr == nil or crt > best_cr) then
+            best_cr = crt
+            best_u = tri[1]
+            best_dark = tri[3]
+        end
+    end
+    if best_u ~= nil then
+        return best_u, best_dark
+    end
+    local fb_u, fb_cr, fb_dark = Theme.get('black'), -1.0, true
+    for _, tri in ipairs(cands) do
+        local crt = wcag_cr(Lbg, tri[2])
+        if crt > fb_cr then
+            fb_cr = crt
+            fb_u = tri[1]
+            fb_dark = tri[3]
+        end
+    end
+    return fb_u, fb_dark
+end
+
+-- Button fill trio from same normalized bar RGB (+ lighten), no unpacking ImGui packed pixels.
+function UIComponents.BarColorButtonVariants(rr, gg, bb)
+    rr, gg, bb = norm_bar_rgb255(rr, gg, bb)
+    local aa = 255
+    local function clamp255(v)
+        if v < 0 then return 0 end
+        if v > 255 then return 255 end
+        return v
+    end
+    local dh1, dh2 = 15, 30
+    return Theme.rgba(rr, gg, bb, aa),
+        Theme.rgba(clamp255(rr + dh1), clamp255(gg + dh1), clamp255(bb + dh1), aa),
+        Theme.rgba(clamp255(rr + dh2), clamp255(gg + dh2), clamp255(bb + dh2), aa)
+end
+
+function UIComponents.BarForegroundU32(rr, gg, bb)
+    local u, _ = UIComponents.BarForegroundPick(rr, gg, bb)
+    return u
 end
 
 function UIComponents.PushBlackText(ctx, flag)
@@ -38,16 +220,34 @@ function UIComponents.PopBlackText(ctx, flag)
     end
 end
 
+-- Always pushes Text (+ TextDisabled when available).
+function UIComponents.PushBarForegroundText(ctx, foreground_u32)
+    local fg = foreground_u32 or Theme.get('text_white_soft')
+    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), fg)
+    local ok, col = pcall(r.ImGui_Col_TextDisabled)
+    if ok then r.ImGui_PushStyleColor(ctx, col, fg) end
+end
+
+function UIComponents.PopBarForegroundText(ctx)
+    local ok = pcall(r.ImGui_Col_TextDisabled)
+    if ok then r.ImGui_PopStyleColor(ctx, 2) else r.ImGui_PopStyleColor(ctx, 1) end
+end
+
+function UIComponents.ShouldUseBlackText(r_val, g_val, b_val)
+    local _, dark = UIComponents.BarForegroundPick(r_val, g_val, b_val)
+    return dark
+end
+
 function UIComponents.GetBarColorAndUseBlack(items, tracks, props)
-    local color = Theme.get('gray_64')
-    local use_black = false
+    local br, gg, bb = norm_bar_rgb255(64, 64, 64)
+    local color = Theme.rgba(br, gg, bb, 255)
     if props.take_type == 'Track' then
         if #tracks == 1 and r.ValidatePtr(tracks[1], 'MediaTrack*') then
             local n = r.GetTrackColor(tracks[1]) or 0
             if n ~= 0 then
-                local rr, gg, bb = r.ColorFromNative(n)
-                color = Theme.rgba(rr, gg, bb, 255)
-                use_black = UIComponents.ShouldUseBlackText(rr, gg, bb)
+                local rr, rg, rb = r.ColorFromNative(n)
+                br, gg, bb = norm_bar_rgb255(rr, rg, rb)
+                color = Theme.rgba(br, gg, bb, 255)
             end
         elseif #tracks > 1 then
             local first = nil
@@ -60,9 +260,9 @@ function UIComponents.GetBarColorAndUseBlack(items, tracks, props)
                 end
             end
             if all_same and first then
-                local rr, gg, bb = r.ColorFromNative(first)
-                color = Theme.rgba(rr, gg, bb, 255)
-                use_black = UIComponents.ShouldUseBlackText(rr, gg, bb)
+                local rr, rg, rb = r.ColorFromNative(first)
+                br, gg, bb = norm_bar_rgb255(rr, rg, rb)
+                color = Theme.rgba(br, gg, bb, 255)
             end
         end
     else
@@ -70,18 +270,19 @@ function UIComponents.GetBarColorAndUseBlack(items, tracks, props)
             if items[1] and r.ValidatePtr(items[1], 'MediaItem*') then
                 local n = r.GetDisplayedMediaItemColor(items[1]) or 0
                 if n ~= 0 then
-                    local rr, gg, bb = r.ColorFromNative(n)
-                    color = Theme.rgba(rr, gg, bb, 255)
-                    use_black = UIComponents.ShouldUseBlackText(rr, gg, bb)
+                    local rr, rg, rb = r.ColorFromNative(n)
+                    br, gg, bb = norm_bar_rgb255(rr, rg, rb)
+                    color = Theme.rgba(br, gg, bb, 255)
                 end
             end
         elseif #items > 1 and props.common_color and not props.colors_differ then
-            local rr, gg, bb = r.ColorFromNative(props.common_color)
-            color = Theme.rgba(rr, gg, bb, 255)
-            use_black = UIComponents.ShouldUseBlackText(rr, gg, bb)
+            local rr, rg, rb = r.ColorFromNative(props.common_color)
+            br, gg, bb = norm_bar_rgb255(rr, rg, rb)
+            color = Theme.rgba(br, gg, bb, 255)
         end
     end
-    return color, use_black
+    local fg_u32, use_black = UIComponents.BarForegroundPick(br, gg, bb)
+    return color, use_black, br, gg, bb, fg_u32
 end
 
 function UIComponents.StyledButton(ctx, label, width, action)
@@ -111,7 +312,7 @@ function UIComponents.ShowTooltipDelayedIfHovered(ctx, key, text, delay)
         if not t then
             _hover_timers[key] = now
         elseif now - t >= (delay or 0.5) then
-            _pending_tooltip_text = text
+            _pending_tooltip_lines = split_tooltip_lines(text)
         end
     else
         _hover_timers[key] = nil
@@ -145,7 +346,7 @@ function UIComponents.ShowTooltipDelayedIfHoveredInAggRegion(ctx, key, text, del
         if not t then
             _hover_timers[key] = now
         elseif now - t >= (delay or 0.5) then
-            _pending_tooltip_text = text
+            _pending_tooltip_lines = split_tooltip_lines(text)
         end
     else
         _hover_timers[key] = nil
@@ -159,27 +360,240 @@ function UIComponents.IsMouseInsideAggRegion(ctx)
 end
 
 function UIComponents.RenderPendingTooltip(ctx)
-    if _pending_tooltip_text and _pending_tooltip_text ~= '' then
-        local ok = pcall(r.ImGui_BeginTooltip, ctx)
-        if ok then
-            r.ImGui_Text(ctx, 'AGGREGATION MODE:')
-            if _italic_font then
-                local pushed = pcall(r.ImGui_PushFont, ctx, _italic_font)
-                if not pushed then pcall(r.ImGui_PushFont, ctx, _italic_font, 13) end
-            end
-            r.ImGui_Text(ctx, 'В данном режиме все внесённые изменения')
-            r.ImGui_Text(ctx, 'суммируются с собственными значениями выделенных объектов')
-            if _italic_font then r.ImGui_PopFont(ctx) end
-            r.ImGui_EndTooltip(ctx)
-        else
-            r.ImGui_SetTooltip(ctx, 'AGGREGATION MODE:\n\nВ данном режиме все внесённые изменения\nсуммируются с собственными значениями выделенных объектов')
-        end
-        _pending_tooltip_text = nil
+    if _pending_tooltip_lines and #_pending_tooltip_lines > 0 then
+        render_styled_tooltip_lines(ctx, _pending_tooltip_lines)
+        _pending_tooltip_lines = nil
     end
+end
+
+function UIComponents.SetTooltipFont(font, pixel_size)
+    _tooltip_font = font
+    _tooltip_font_size = pixel_size or 13
+end
+
+function UIComponents.QueueStyledTooltipDelayed(ctx, id, lines, delay)
+    UIComponents.QueueStyledTooltipDelayedGeneric(ctx, id, lines, delay, r.ImGui_IsItemHovered(ctx))
+end
+
+function UIComponents.QueueStyledTooltipDelayedGeneric(ctx, id, lines, delay, is_hovered)
+    if not id or id == '' or lines == nil then return end
+    if type(lines) == 'table' and #lines == 0 then return end
+    if not is_hovered then
+        _styled_tt_hover_start[id] = nil
+        _styled_tt_hover_last_pos[id] = nil
+        return
+    end
+    local mx, my = r.ImGui_GetMousePos(ctx)
+    local last = _styled_tt_hover_last_pos[id]
+    local moved = last and (mx ~= last.x or my ~= last.y)
+    _styled_tt_hover_last_pos[id] = { x = mx, y = my }
+    local now = r.time_precise()
+    if moved or not _styled_tt_hover_start[id] then
+        _styled_tt_hover_start[id] = now
+        return
+    end
+    if (now - _styled_tt_hover_start[id]) >= (delay or STYLED_TOOLTIP_DELAY_DEFAULT) then
+        local ln = lines
+        if type(ln) == 'function' then
+            ln = ln()
+        end
+        if ln and type(ln) == 'table' and #ln > 0 then
+            _pending_tooltip_lines = ln
+        end
+    end
+end
+
+function UIComponents.ClearStyledTooltipHoverState(id)
+    if not id or id == '' then return end
+    _styled_tt_hover_start[id] = nil
+    _styled_tt_hover_last_pos[id] = nil
 end
 
 function UIComponents.SetItalicFont(font)
     _italic_font = font
+end
+
+local function get_first_selected_disk_media_path()
+    local count = r.CountSelectedMediaItems(0)
+    for i = 0, count - 1 do
+        local item = r.GetSelectedMediaItem(0, i)
+        if item and r.ValidatePtr(item, 'MediaItem*') then
+            local take = r.GetActiveTake(item)
+            if take then
+                local src = r.GetMediaItemTake_Source(take)
+                if src then
+                    local stype = r.GetMediaSourceType(src, '')
+                    if stype ~= 'MIDI' then
+                        local p = r.GetMediaSourceFileName(src, '')
+                        if p and p ~= '' then return p end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function reveal_media_path_in_system_browser(path)
+    if not path or path == '' then return end
+    if is_windows_os() then
+        os.execute(string.format('explorer /select,%q', path))
+    else
+        os.execute(string.format('open -R %q', path))
+    end
+end
+
+function UIComponents.GetItemInfoButtonTooltipLines()
+    if is_mac_os() then
+        return {
+            'Click — Item Properties',
+            '\226\140\152 + Click \226\128\148 Media Explorer',
+            '\226\140\165 + Click \226\128\148 Source File Properties',
+            '\226\140\152\226\135\167 + Click \226\128\148 Reveal in Finder',
+        }
+    elseif is_windows_os() then
+        return {
+            'Click — Item Properties',
+            'Ctrl+Click — Show File in Media Explorer',
+            'Alt+Click — Source File Properties',
+            'Ctrl+Shift+Click — Reveal in File Explorer',
+        }
+    end
+    return {
+        'Click — Item Properties',
+        'Ctrl+Click — Show File in Media Explorer',
+        'Alt+Click — Source File Properties',
+        'Ctrl+Shift+Click — Reveal in File Manager',
+    }
+end
+
+function UIComponents.GetTrackInfoButtonTooltipLines()
+    if is_mac_os() then
+        return {
+            'Click — Track Properties',
+            '\226\140\152 + Click \226\128\148 Source File Properties',
+            '\226\140\152\226\135\167 + Click \226\128\148 Reveal in Finder',
+        }
+    elseif is_windows_os() then
+        return {
+            'Click — Track Properties',
+            'Ctrl+Click — Source File Properties',
+            'Ctrl+Shift+Click — Reveal in File Explorer',
+        }
+    end
+    return {
+        'Click — Track Properties',
+        'Ctrl+Click — Source File Properties',
+        'Ctrl+Shift+Click — Reveal in File Manager',
+    }
+end
+
+function UIComponents.GetItemNotesButtonTooltipLines()
+    return { 'Item Notes' }
+end
+
+function UIComponents.GetPreservePitchTooltipLines()
+    return { 'Preserve Pitch When Changing Playback Speed' }
+end
+
+function UIComponents.GetStretchModeResetTooltipLines()
+    return { 'Reset — Project Default Stretch Mode' }
+end
+
+function UIComponents.GetStretchModeMenuTooltipLines()
+    return { 'Choose Time/Pitch Stretch Algorithm' }
+end
+
+function UIComponents.GetItemPitchTooltipLines()
+    if is_mac_os() then
+        return {
+            'Drag — Pitch (Semitones)',
+            '\226\135\167 + Drag — Move by Octave',
+            'Double-Click — Reset to 0 (Single Item)',
+            '\226\140\152 + Click — Type Value',
+        }
+    elseif is_windows_os() then
+        return {
+            'Drag — Pitch (Semitones)',
+            'Shift+Drag — Move by Octave',
+            'Double-Click — Reset to 0 (Single Item)',
+            'Ctrl+Click — Type Value',
+        }
+    end
+    return {
+        'Drag — Semitones; Shift+Drag — Octave',
+        'Double-Click — Reset (Single Item); Ctrl+Click — Type Value',
+    }
+end
+
+function UIComponents.GetVolumeFaderTooltipLines()
+    return {
+        'Slider — Item Volume (dB)',
+        'Vol: — Reset to Unity Gain',
+        'Multiple Items — Relative Change',
+    }
+end
+
+function UIComponents.GetVelocityFaderTooltipLines()
+    return {
+        'Slider — MIDI Velocity Scale',
+        'Vel: — Reset to 1.00x',
+        'Multiple Items — Relative Change',
+    }
+end
+
+function UIComponents.GetTakeTcpMirrorTooltipLines()
+    if is_mac_os() then
+        return {
+            'Same as TCP Take Button',
+            'Click — Cycle Takes',
+            '\226\140\152 \226\140\165 \226\135\167 — Extra Actions',
+        }
+    elseif is_windows_os() then
+        return {
+            'Same as TCP Take Button',
+            'Click — Cycle Takes',
+            'Ctrl / Alt / Shift — Extra Actions',
+        }
+    end
+    return {
+        'Same as TCP Take Button',
+        'Click — Cycle Takes',
+    }
+end
+
+function UIComponents.GetTakePickerTooltipLines()
+    return {
+        'Choose Active Take',
+        '< > — Previous / Next Take',
+    }
+end
+
+function UIComponents.GetFxChainButtonTooltipLines()
+    if is_mac_os() then
+        return {
+            'Click — Item FX Chain',
+            '\226\140\152 + Click — FX Chain Window When FX Present',
+            '\226\140\165 + Click — Remove All Item FX',
+        }
+    elseif is_windows_os() then
+        return {
+            'Click — Item FX Chain',
+            'Ctrl+Click — FX Chain Window When FX Present',
+            'Alt+Click — Remove All Item FX',
+        }
+    end
+    return {
+        'Click — Item FX Chain',
+        'Ctrl+Click — FX Chain Window When FX Present',
+        'Alt+Click — Remove All Item FX',
+    }
+end
+
+function UIComponents.GetPanelBackgroundTooltipLines()
+    return {
+        'Right-Click — Switch Track / Item Panel',
+    }
 end
 
 function UIComponents.Separator(ctx, left, right)
@@ -619,7 +1033,7 @@ end
 
 local _pitch_drag_state = {}
 
-function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_val, max_val, format, reset_action, label_width, has_different_values, is_modified, is_mixed, agg_count, color_by_sign, octave_drag_default)
+function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_val, max_val, format, reset_action, label_width, has_different_values, is_modified, is_mixed, agg_count, color_by_sign, octave_drag_default, on_cmd_click, tooltip_lines)
     if is_modified == nil then
         is_modified = (value ~= 0)
     end
@@ -635,6 +1049,14 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
         r.ImGui_PopStyleColor(ctx, 1)
     else
         UIComponents.StyledResetButton(ctx, label, label_width or 40, is_modified, reset_action, nil, is_mixed)
+    end
+    local tt_lines = tooltip_lines
+    local tt_id = nil
+    local r1x1, r1y1, r1x2, r1y2
+    if tt_lines and #tt_lines > 0 then
+        tt_id = 'vp_' .. string.gsub(label, '[^%w]', '_')
+        r1x1, r1y1 = r.ImGui_GetItemRectMin(ctx)
+        r1x2, r1y2 = r.ImGui_GetItemRectMax(ctx)
     end
     if agg_count and agg_count > 1 then UIComponents.ExtendAggHoverRegion(ctx) end
     r.ImGui_SameLine(ctx, 0, 2)
@@ -653,7 +1075,16 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
     local item_deactivated = r.ImGui_IsItemDeactivated(ctx)
     local activated = r.ImGui_IsItemActivated(ctx)
     local mouse_down = r.ImGui_IsMouseDown(ctx, 0)
-    if activated then
+    local cmd_click_handled = false
+    if activated and on_cmd_click then
+        local mods = r.ImGui_GetKeyMods(ctx)
+        local cmd_held = (mods & r.ImGui_Mod_Super()) ~= 0 or (mods & r.ImGui_Mod_Ctrl()) ~= 0
+        if cmd_held then
+            on_cmd_click()
+            cmd_click_handled = true
+        end
+    end
+    if activated and not cmd_click_handled then
         _pitch_drag_state[id] = { start = value, last = value }
     end
     local changed = false
@@ -714,6 +1145,17 @@ function UIComponents.VerticalPitchControl(ctx, label, value, width, speed, min_
     elseif item_deactivated and not mouse_down then
         deactivated = true
     end
+    if tt_id and tt_lines and #tt_lines > 0 and r1x1 then
+        local r2x1, r2y1 = r.ImGui_GetItemRectMin(ctx)
+        local r2x2, r2y2 = r.ImGui_GetItemRectMax(ctx)
+        local mx, my = r.ImGui_GetMousePos(ctx)
+        local ux1 = math.min(r1x1, r2x1)
+        local uy1 = math.min(r1y1, r2y1)
+        local ux2 = math.max(r1x2, r2x2)
+        local uy2 = math.max(r1y2, r2y2)
+        local inside = mx >= ux1 and mx <= ux2 and my >= uy1 and my <= uy2
+        UIComponents.QueueStyledTooltipDelayedGeneric(ctx, tt_id, tt_lines, STYLED_TOOLTIP_DELAY_DEFAULT, inside)
+    end
     return changed, new_value, deactivated, activated
 end
 
@@ -721,47 +1163,41 @@ end
 function UIComponents.RenderInfoButton(ctx, command_id)
     UIComponents.StyledButton(ctx, 'i', 18, function()
         local mods = r.ImGui_GetKeyMods(ctx)
+        local alt_pressed = (mods & r.ImGui_Mod_Alt()) ~= 0
+        local shift_pressed = (mods & r.ImGui_Mod_Shift()) ~= 0
         local cmd_pressed = (mods & r.ImGui_Mod_Super()) ~= 0
         local ctrl_pressed = (mods & r.ImGui_Mod_Ctrl()) ~= 0
-        local shift_pressed = (mods & r.ImGui_Mod_Shift()) ~= 0
-        if (cmd_pressed or ctrl_pressed) and shift_pressed then
-            local count = r.CountSelectedMediaItems(0)
-            local path = nil
-            for i = 0, count - 1 do
-                local item = r.GetSelectedMediaItem(0, i)
-                if item and r.ValidatePtr(item, 'MediaItem*') then
-                    local take = r.GetActiveTake(item)
-                    if take then
-                        local src = r.GetMediaItemTake_Source(take)
-                        if src then
-                            local stype = r.GetMediaSourceType(src, '')
-                            if stype ~= 'MIDI' then
-                                local p = r.GetMediaSourceFileName(src, '')
-                                if p and p ~= '' then
-                                    path = p
-                                    break
-                                end
-                            end
-                        end
-                    end
+        local cmd_or_ctrl = cmd_pressed or ctrl_pressed
+        local path = get_first_selected_disk_media_path()
+
+        if shift_pressed and cmd_or_ctrl then
+            reveal_media_path_in_system_browser(path)
+            return
+        end
+
+        if command_id == ITEM_INFO_PROPERTIES_ACTION then
+            if alt_pressed then
+                r.Main_OnCommand(40011, 0)
+            elseif cmd_or_ctrl then
+                if path and r.APIExists and r.APIExists('OpenMediaExplorer') then
+                    pcall(r.OpenMediaExplorer, path, false)
                 end
+            else
+                r.Main_OnCommand(command_id, 0)
             end
-            if path then
-                local os_str = r.GetOS()
-                if os_str:match('Win') then
-                    local cmd = string.format('explorer /select,%q', path)
-                    os.execute(cmd)
-                else
-                    local cmd = string.format('open -R %q', path)
-                    os.execute(cmd)
-                end
-            end
-        elseif cmd_pressed or ctrl_pressed then
-            r.Main_OnCommand(40011, 0)
         else
-            r.Main_OnCommand(command_id, 0)
+            if cmd_or_ctrl then
+                r.Main_OnCommand(40011, 0)
+            else
+                r.Main_OnCommand(command_id, 0)
+            end
         end
     end)
+
+    local tip_lines = (command_id == ITEM_INFO_PROPERTIES_ACTION)
+        and UIComponents.GetItemInfoButtonTooltipLines()
+        or UIComponents.GetTrackInfoButtonTooltipLines()
+    UIComponents.QueueStyledTooltipDelayed(ctx, 'frenkie_info_btn_' .. tostring(command_id), tip_lines, STYLED_TOOLTIP_DELAY_DEFAULT)
 end
 
 function UIComponents.PushLabelStateColor(ctx, disabled, is_mixed, is_modified)

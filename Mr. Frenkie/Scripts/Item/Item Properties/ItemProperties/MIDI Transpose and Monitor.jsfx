@@ -1,3 +1,4 @@
+-- @noindex
 desc:MIDI Transpose and Monitor
 //tags: MIDI processing utility
 //author: Mr. Frenkie (Modified)
@@ -764,75 +765,47 @@ gfx_y = pad_top + str_h + pad_gap;
     gfx_r = 0.8; gfx_g = 0.8; gfx_b = 0.8;
   );
 
-  // First, check if we need to add bass for measurement
-  slash_pos = find_char(chord_line_a, '/');
-  will_add_bass = (slash_pos < 0 && strlen(chord_line_a) > 0 && last_is_inv);
-  
-  // Measure total width (chord + optional bass)
   font_sz = chord_base_font_sz;
   gfx_setfont(2, "Arial", font_sz);
-  gfx_measurestr(chord_line_a, cw_chord, ch);
-  will_add_bass ? (
-    gfx_measurestr("/", cw_slash, ch);
-    gfx_measurestr(#last_inv_name, cw_bass, ch);
-    cw = cw_chord + cw_slash + cw_bass;
-  ) : (
-    cw = cw_chord;
+  draw_str = #draw_str;
+  strcpy(draw_str, chord_line_a);
+  (note_count > 1 && min_note != chord_root) ? (
+    slash_pos = find_char(draw_str, '/');
+    (slash_pos < 0) ? (
+      pitch_to_name(chord_root, #tmp_root_name);
+      chord_bass_name(#tmp_root_name, chord_root, min_note, #tmp_bass_name);
+      strcat(draw_str, "/");
+      strcat(draw_str, #tmp_bass_name);
+    );
   );
-  
-  // Adjust font size based on TOTAL width
-  cw > gfx_w - 16 ? (
-    font_sz = 30; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 26; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 22; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 20; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 18; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 16; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
-  cw > gfx_w - 16 ? (
-    font_sz = 14; gfx_setfont(2, "Arial", font_sz);
-    gfx_measurestr(chord_line_a, cw_chord, ch);
-    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
-  );
+  gfx_measurestr(draw_str, cw, ch);
+  cw > gfx_w - 16 ? (font_sz = 30; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  cw > gfx_w - 16 ? (font_sz = 26; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  cw > gfx_w - 16 ? (font_sz = 22; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
 
-  // Center based on TOTAL width
+  cw > gfx_w - 16 ? (font_sz = 20; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  cw > gfx_w - 16 ? (font_sz = 18; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  cw > gfx_w - 16 ? (font_sz = 16; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  cw > gfx_w - 16 ? (font_sz = 14; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+
+  gfx_measurestr(draw_str, cw, ch);
   gfx_x = (gfx_w - cw) / 2;
-  
-  // Draw exactly as before (multiple calls)
-  gfx_drawstr(chord_line_a);
-  will_add_bass ? (
+  gfx_drawstr(draw_str);
+
+  // Draw inversion bass overlay if missing in main line
+  slash_pos = find_char(chord_line_a, '/');
+  (slash_pos < 0 && strlen(chord_line_a) > 0 && last_is_inv) ? (
     gfx_drawstr("/");
     gfx_drawstr(#last_inv_name);
   );
 
-  // Debug line (optional - uncomment if needed)
-  // gfx_setfont(2, "Arial", 12);
-  // gfx_r = 0.7; gfx_g = 0.7; gfx_b = 0.7;
-  // gfx_x = 10;
-  // gfx_y = pad_top + str_h + pad_gap + chord_line2_gap;
-  // gfx_drawstr(#debug_line);
+  // Debug line
+  gfx_setfont(2, "Arial", 12);
+  gfx_r = 0.7; gfx_g = 0.7; gfx_b = 0.7;
+  gfx_measurestr(#debug_line, cw, ch);
+  gfx_x = 10;
+  gfx_y = pad_top + str_h + pad_gap + chord_line2_gap;
+  gfx_drawstr(#debug_line);
 
 
 );

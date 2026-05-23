@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
@@ -184,6 +185,7 @@ function TimestrechWidget.Render(ctx, props, items, core, StyledResetButton)
         StyledResetButton(ctx, 'Mode:', 40, is_modified, function()
             apply_mode(props, items, -1, 0)
         end, nil, is_mode_mixed)
+        UI.QueueStyledTooltipDelayed(ctx, 'fip_mode_rst', UI.GetStretchModeResetTooltipLines(), 1.0)
         r.ImGui_SameLine(ctx, 0, 5)
         local current_name = "Project Default"
         if is_mode_mixed then
@@ -195,6 +197,7 @@ function TimestrechWidget.Render(ctx, props, items, core, StyledResetButton)
         if UI.TextButton(ctx, (current_name or "Project Default") .. '##PitchModeMenu', 120) then
             r.ImGui_OpenPopup(ctx, 'PitchModeMenu')
         end
+        UI.QueueStyledTooltipDelayed(ctx, 'fip_mode_menu', UI.GetStretchModeMenuTooltipLines(), 1.0)
         if r.ImGui_BeginPopup(ctx, 'PitchModeMenu') then
             local accent_color = Theme.get('green_accent')
             local modes = sorted_modes()

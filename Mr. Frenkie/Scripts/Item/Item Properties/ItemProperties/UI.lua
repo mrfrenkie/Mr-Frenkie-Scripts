@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local script_path_full = debug.getinfo(1, 'S').source:match('@(.*)')
@@ -61,11 +62,138 @@ local lock_icon_unlocked = nil
 local lock_icon_mixed = nil
 local first_auto_resize = true
 local initial_item_width = 1100
-local playback_offset_last_guid = nil
-local playback_offset_last_ms = 0.0
-local playback_offset_last_unit = 'ms'
-local playback_offset_last_valid = false
-local playback_offset_edit_focus = false
+local bpm_value_edit = { active = false, text = '', want_focus = false }
+local rate_value_edit = { active = false, text = '', want_focus = false }
+local pitch_value_edit = { active = false, text = '', want_focus = false }
+
+--- Last-frame screen-space rect of the FX snapshot row (A–F, +) for hit-testing before item/track context toggle.
+local fip_fxsnap_row_screen_rect = { valid = false, x1 = 0, y1 = 0, x2 = 0, y2 = 0 }
+
+--- Normalize values returned from extension APIs (number, or ReaScript-wrapped types).
+local function fip_api_double(v)
+    if v == nil then return nil end
+    local t = type(v)
+    if t == 'number' then return v end
+    if t == 'boolean' then return v and 1.0 or 0.0 end
+    local n = tonumber(v)
+    if n ~= nil then return n end
+    return tonumber(tostring(v))
+end
+
+local function parse_fx_snap_tooltip_ml(s)
+    if not s or s == '' then
+        return nil
+    end
+    local rows = {}
+    for line in s:gmatch('[^\r\n]+') do
+        local bar = line:find('|', 1, true)
+        if bar and bar > 1 then
+            local code = line:sub(1, bar - 1)
+            local rest = line:sub(bar + 1)
+            if #code == 1 and code >= '0' and code <= '2' then
+                local c = Theme.get('tooltip_text')
+                if code == '1' then
+                    c = Theme.get('tooltip_fx_bypass')
+                elseif code == '2' then
+                    c = Theme.get('tooltip_fx_disabled')
+                end
+                rows[#rows + 1] = { text = rest, color = c }
+            else
+                rows[#rows + 1] = line
+            end
+        else
+            rows[#rows + 1] = line
+        end
+    end
+    if #rows == 0 then
+        return nil
+    end
+    return rows
+end
+
+local function get_fx_snap_slot_tooltip_lines(track, btn_idx)
+    if not (track and r.ValidatePtr(track, 'MediaTrack*')) then
+        return {}
+    end
+    local raw = ''
+    if r.APIExists and r.APIExists('FIP_TrackFXSnap_GetSlotFxTooltipStr') then
+        local n_snap = fip_api_double(r.FIP_TrackFXSnap_GetSlotCountVal(track, '', 0)) or -1
+        local sel_slot = fip_api_double(r.FIP_TrackFXSnap_GetSelectedSlotVal(track, '', 0)) or -1
+        local can_recall = (n_snap >= 2)
+        local is_active = can_recall and (sel_slot == btn_idx)
+        local use_live = (not can_recall) or is_active
+        local p = use_live and 0.0 or (btn_idx + 0.0)
+        raw = r.FIP_TrackFXSnap_GetSlotFxTooltipStr(track, '', p) or ''
+    end
+    local parsed = parse_fx_snap_tooltip_ml(raw)
+    if not parsed then
+        parsed = { { text = '(no FX)', color = Theme.get('tooltip_text') } }
+    end
+    return parsed
+end
+
+local function fip_clear_fxsnap_slot_tooltips(track)
+    local g = track and r.GetTrackGUID(track)
+    if g and g ~= '' then
+        for ti = 1, 8 do
+            UI.ClearStyledTooltipHoverState('fip_fxsnap_tt_' .. g .. '_' .. tostring(ti))
+        end
+    end
+end
+
+local function fip_try_fxsnap_slot_context_menu(ctx, slot_1_based, track)
+    if not (track and r.ValidatePtr(track, 'MediaTrack*')) then
+        return
+    end
+    local has_rm = r.APIExists and r.APIExists('FIP_TrackFXSnap_RemoveSnapshotSlot')
+    local has_cp = r.APIExists and r.APIExists('FIP_TrackFXSnap_CopySnapshotSlot')
+    local has_ps = r.APIExists and r.APIExists('FIP_TrackFXSnap_PasteSnapshotSlot')
+    local has_cb = r.APIExists and r.APIExists('FIP_TrackFXSnap_ClipboardHasSnapshotVal')
+    if not (has_rm or has_cp or has_ps) then
+        return
+    end
+    local pid = 'fip_ctx_fxsnap##' .. tostring(slot_1_based)
+    if r.ImGui_IsItemHovered(ctx) and r.ImGui_IsMouseClicked(ctx, 1) then
+        r.ImGui_OpenPopup(ctx, pid)
+    end
+    if r.ImGui_BeginPopup(ctx, pid) then
+        local can_paste = has_ps and has_cb
+            and ((fip_api_double(r.FIP_TrackFXSnap_ClipboardHasSnapshotVal(track, '', 0)) or 0) > 0.5)
+        if has_cp then
+            if r.ImGui_Selectable(ctx, 'Copy Snapshot##fip_cp_' .. tostring(slot_1_based)) then
+                r.FIP_TrackFXSnap_CopySnapshotSlot(track, slot_1_based + 0.0, 0)
+                r.ImGui_CloseCurrentPopup(ctx)
+            end
+        end
+        if has_ps then
+            if not can_paste then
+                r.ImGui_BeginDisabled(ctx, true)
+            end
+            if r.ImGui_Selectable(ctx, 'Paste Snapshot##fip_ps_' .. tostring(slot_1_based)) then
+                local ps = fip_api_double(r.FIP_TrackFXSnap_PasteSnapshotSlot(track, slot_1_based + 0.0, 0))
+                if ps ~= nil and ps ~= -1 then
+                    fip_clear_fxsnap_slot_tooltips(track)
+                    r.UpdateArrange()
+                end
+                r.ImGui_CloseCurrentPopup(ctx)
+            end
+            if not can_paste then
+                r.ImGui_EndDisabled(ctx)
+            end
+        end
+        if has_rm then
+            if r.ImGui_Selectable(ctx, 'Remove Snapshot##fip_rm_' .. tostring(slot_1_based)) then
+                local rm = fip_api_double(r.FIP_TrackFXSnap_RemoveSnapshotSlot(track, slot_1_based + 0.0, 0))
+                if rm ~= nil and rm ~= -1 then
+                    fip_clear_fxsnap_slot_tooltips(track)
+                    r.UpdateArrange()
+                end
+                r.ImGui_CloseCurrentPopup(ctx)
+            end
+        end
+        r.ImGui_EndPopup(ctx)
+    end
+end
 
 local function CreateFont(file_path)
     return r.ImGui_CreateFont(file_path)
@@ -109,6 +237,7 @@ function EnsureImGuiContext()
         ctx = r.ImGui_CreateContext('Frenkie Item Properties')
         font = CreateFont(script_dir .. 'fonts/Roboto-Regular.ttf')
         pcall(r.ImGui_Attach, ctx, font)
+        UI.SetTooltipFont(font, 13)
         local italic_path = script_dir .. 'fonts/Roboto-Italic.ttf'
         local f = io.open(italic_path, 'rb')
         if f then
@@ -263,72 +392,87 @@ local function Main()
 
     local ms_left = r.JS_Mouse_GetState(1)
     local ms_right = r.JS_Mouse_GetState(2)
-    local window_hovered = visible and r.ImGui_IsWindowHovered(ctx)
+    local hover_flags = r.ImGui_HoveredFlags_ChildWindows()
+                      | r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()
+                      | r.ImGui_HoveredFlags_AllowWhenBlockedByPopup()
+    local window_hovered = visible and r.ImGui_IsWindowHovered(ctx, hover_flags)
+
+    local suppress_rclick_item_track_for_fxsnap_row = false
+    if fip_fxsnap_row_screen_rect.valid and r.ImGui_IsMouseClicked(ctx, 1) then
+        local R = fip_fxsnap_row_screen_rect
+        local mx, my = r.ImGui_GetMousePos(ctx)
+        if mx >= R.x1 and mx <= R.x2 and my >= R.y1 and my <= R.y2 then
+            suppress_rclick_item_track_for_fxsnap_row = true
+        end
+    end
+
+    local right_clicked_in_widget = visible
+        and r.ImGui_IsMouseClicked(ctx, 1)
+        and window_hovered
+        and not suppress_rclick_item_track_for_fxsnap_row
+
+    if right_clicked_in_widget then
+        local showing_track_before
+        if state.manual_context_override then
+            showing_track_before = state.manual_context_prefer_track and true or false
+        else
+            showing_track_before = state.prefer_track_context and true or false
+        end
+        state.manual_context_override = true
+        state.manual_context_prefer_track = not showing_track_before
+        state.prefer_track_context = state.manual_context_prefer_track
+        state.force_track_context = state.manual_context_prefer_track
+        if not state.manual_context_prefer_track then
+            state.hovered_track = nil
+        end
+        local items_cnt = (r.APIExists and r.APIExists("FIP_CountSelectedItems"))
+            and math.floor(tonumber((r.FIP_CountSelectedItems("", 0))) or 0)
+            or r.CountSelectedMediaItems(0)
+
+        local items_sig = (r.APIExists and r.APIExists("FIP_GetSelectedItemsSignatureStr"))
+            and (r.FIP_GetSelectedItemsSignatureStr("", 0) or "")
+            or ""
+
+        local items_now = {}
+        if items_cnt == 1 then
+            local it = r.GetSelectedMediaItem(0, 0)
+            if it then items_now[1] = it end
+        end
+
+        local tracks_now = Track.GetSelectedTracks()
+        if state.manual_context_prefer_track and #tracks_now > 0 then
+            state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+            state.cached_items = {}
+            state.cached_items_sig = items_sig
+            state.cached_items_count = items_cnt
+            state.cached_tracks = tracks_now
+        elseif not state.manual_context_prefer_track and items_cnt > 0 then
+            state.cached_props = Item.GetAggregatedProps(items_now)
+            state.cached_items = items_now
+            state.cached_items_sig = items_sig
+            state.cached_items_count = items_cnt
+            state.cached_tracks = tracks_now
+        elseif #tracks_now > 0 then
+            state.cached_props = { take_type = 'Track', name = 'Selected Track' }
+            state.cached_items = items_now
+            state.cached_items_sig = items_sig
+            state.cached_items_count = items_cnt
+            state.cached_tracks = tracks_now
+        else
+            state.cached_props = {}
+            state.cached_items = items_now
+            state.cached_items_sig = items_sig
+            state.cached_items_count = items_cnt
+            state.cached_tracks = tracks_now
+        end
+        core.SetState(state)
+    end
 
     if (ms_left == 1 or ms_right == 2) and not state.last_mouse_state then
         state.last_mouse_button = (ms_right == 2) and 2 or 1
-        if ms_right == 2 then
-            if window_hovered then
-                state.manual_context_override = true
-                local show_track_now = (state.manual_context_override and state.manual_context_prefer_track)
-                    or (not state.manual_context_override and state.prefer_track_context)
-                state.manual_context_prefer_track = not show_track_now
-                state.prefer_track_context = state.manual_context_prefer_track
-                state.force_track_context = state.manual_context_prefer_track
-                if not state.manual_context_prefer_track then
-                    state.hovered_track = nil
-                end
-                local items_cnt = (r.APIExists and r.APIExists("FIP_CountSelectedItems"))
-                    and math.floor(tonumber((r.FIP_CountSelectedItems("", 0))) or 0)
-                    or r.CountSelectedMediaItems(0)
-
-                local items_sig = (r.APIExists and r.APIExists("FIP_GetSelectedItemsSignatureStr"))
-                    and (r.FIP_GetSelectedItemsSignatureStr("", 0) or "")
-                    or ""
-
-                local items_now = {}
-                if items_cnt == 1 then
-                    local it = r.GetSelectedMediaItem(0, 0)
-                    if it then items_now[1] = it end
-                end
-
-                local tracks_now = Track.GetSelectedTracks()
-                if state.manual_context_prefer_track and #tracks_now > 0 then
-                    state.cached_props = { take_type = 'Track', name = 'Selected Track' }
-                    state.cached_items = {}
-                    state.cached_items_sig = items_sig
-                    state.cached_items_count = items_cnt
-                    state.cached_tracks = tracks_now
-                elseif not state.manual_context_prefer_track and items_cnt > 0 then
-                    state.cached_props = Item.GetAggregatedProps(items_now)
-                    state.cached_items = items_now
-                    state.cached_items_sig = items_sig
-                    state.cached_items_count = items_cnt
-                    state.cached_tracks = tracks_now
-                elseif #tracks_now > 0 then
-                    state.cached_props = { take_type = 'Track', name = 'Selected Track' }
-                    state.cached_items = items_now
-                    state.cached_items_sig = items_sig
-                    state.cached_items_count = items_cnt
-                    state.cached_tracks = tracks_now
-                else
-                    state.cached_props = {}
-                    state.cached_items = items_now
-                    state.cached_items_sig = items_sig
-                    state.cached_items_count = items_cnt
-                    state.cached_tracks = tracks_now
-                end
-            else
-                state.manual_context_override = false
-                ApplyContextFromReaperCursor(state)
-            end
-        else
-            if window_hovered then
-                -- Left-click inside widget: don't change context (cache updated in visible block)
-            else
-                state.manual_context_override = false
-                ApplyContextFromReaperCursor(state)
-            end
+        if not window_hovered then
+            state.manual_context_override = false
+            ApplyContextFromReaperCursor(state)
         end
         state.last_mouse_state = true
         core.SetState(state)
@@ -340,6 +484,7 @@ local function Main()
 
     if visible then
         local state = core.GetState()
+        local fip_fxsnap_strip_committed = false
 
         local items_count = (r.APIExists and r.APIExists("FIP_CountSelectedItems"))
             and math.floor(tonumber((r.FIP_CountSelectedItems("", 0))) or 0)
@@ -463,7 +608,7 @@ local function Main()
             r.ImGui_Text(ctx, 'No items or tracks selected')
         elseif props then
             props.sel_item_count = item_count
-            local color, use_black = UI.GetBarColorAndUseBlack(items, tracks, props)
+            local color, _, bar_rr, bar_gg, bar_bb, bar_fg = UI.GetBarColorAndUseBlack(items, tracks, props)
 
             r.ImGui_BeginGroup(ctx)
 
@@ -474,7 +619,7 @@ local function Main()
 
 
             local bar_color = color
-            UI.PushBlackText(ctx, use_black)
+            UI.PushBarForegroundText(ctx, bar_fg)
 
             local changed, new_name
             if props.take_type == 'Track' then
@@ -530,7 +675,7 @@ local function Main()
                 end
             end
 
-            UI.PopBlackText(ctx, use_black)
+            UI.PopBarForegroundText(ctx)
 
             r.ImGui_EndGroup(ctx)
 
@@ -539,6 +684,88 @@ local function Main()
                 UI.RenderInfoButton(ctx, 41654)
                 UI.Separator(ctx)
                 local single_track = (#tracks >= 1 and r.ValidatePtr(tracks[1], 'MediaTrack*')) and tracks[1] or nil
+                if single_track and #tracks == 1 and r.APIExists and r.APIExists('FIP_TrackFXSnap_GetSlotCountVal') then
+                    local snap_tt_api = (r.APIExists and r.APIExists('FIP_TrackFXSnap_GetSlotFxTooltipStr')) or false
+                    local track_guid_tt = (snap_tt_api and single_track and r.GetTrackGUID(single_track)) or nil
+
+                    local function queue_snap_slot_tt(btn_idx)
+                        if not (snap_tt_api and track_guid_tt) then return end
+                        UI.QueueStyledTooltipDelayedGeneric(ctx,
+                            'fip_fxsnap_tt_' .. track_guid_tt .. '_' .. tostring(btn_idx),
+                            function()
+                                return get_fx_snap_slot_tooltip_lines(single_track, btn_idx)
+                            end,
+                            1.0,
+                            r.ImGui_IsItemHovered(ctx))
+                    end
+
+                    local max_snap = 6
+                    local n_snap = fip_api_double(r.FIP_TrackFXSnap_GetSlotCountVal(single_track, '', 0)) or -1
+                    local sel_slot = fip_api_double(r.FIP_TrackFXSnap_GetSelectedSlotVal(single_track, '', 0)) or -1
+                    local letter_count = math.min((n_snap >= 2) and n_snap or 1, max_snap)
+                    local at_snap_limit = (n_snap >= max_snap)
+                    r.ImGui_PushID(ctx, string.format('fip_fxsnap_strip_%d_%d', math.floor(n_snap + 0.5), math.floor(sel_slot + 0.5)))
+                    r.ImGui_BeginGroup(ctx)
+                    for si = 1, letter_count do
+                        local btn_i = si
+                        if btn_i > 1 then
+                            r.ImGui_SameLine(ctx, 0, 4)
+                        end
+                        local label = string.char(64 + btn_i)
+                        local can_recall = (n_snap >= 2)
+                        local is_active = can_recall and (sel_slot == btn_i)
+                        if can_recall then
+                            if is_active then
+                                r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), bar_fg)
+                                local c0, ch, ca = UI.BarColorButtonVariants(bar_rr, bar_gg, bar_bb)
+                                UI.ColoredButton(ctx, label, 24, c0, ch, ca, function()
+                                    r.FIP_TrackFXSnap_SelectSlot(single_track, btn_i + 0.0, 0)
+                                end)
+                                r.ImGui_PopStyleColor(ctx, 1)
+                                queue_snap_slot_tt(btn_i)
+                                fip_try_fxsnap_slot_context_menu(ctx, btn_i + 0.0, single_track)
+                            else
+                                UI.StyledButton(ctx, label, 24, function()
+                                    r.FIP_TrackFXSnap_SelectSlot(single_track, btn_i + 0.0, 0)
+                                end)
+                                queue_snap_slot_tt(btn_i)
+                                fip_try_fxsnap_slot_context_menu(ctx, btn_i + 0.0, single_track)
+                            end
+                        else
+                            r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('text_gray'))
+                            UI.ColoredButton(ctx, label, 24, Theme.get('gray_42'), Theme.get('gray_58'),
+                                Theme.get('gray_74'), function() end)
+                            r.ImGui_PopStyleColor(ctx, 1)
+                            queue_snap_slot_tt(btn_i)
+                        end
+                    end
+                    r.ImGui_SameLine(ctx, 0, 6)
+                    if at_snap_limit then
+                        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('text_gray'))
+                        UI.ColoredButton(ctx, '+', 24, Theme.get('gray_42'), Theme.get('gray_58'),
+                            Theme.get('gray_74'), function() end)
+                        r.ImGui_PopStyleColor(ctx, 1)
+                    else
+                        UI.StyledButton(ctx, '+', 24, function()
+                            r.FIP_TrackFXSnap_AddSnapshotSlot(single_track, '', 0)
+                        end)
+                    end
+                    r.ImGui_EndGroup(ctx)
+                    do
+                        local min_x, min_y = r.ImGui_GetItemRectMin(ctx)
+                        local max_x, max_y = r.ImGui_GetItemRectMax(ctx)
+                        fip_fxsnap_row_screen_rect = {
+                            valid = true,
+                            x1 = min_x,
+                            y1 = min_y,
+                            x2 = max_x,
+                            y2 = max_y
+                        }
+                        fip_fxsnap_strip_committed = true
+                    end
+                    r.ImGui_PopID(ctx)
+                    UI.Separator(ctx)
+                end
                 local has_track_note = false
                 if single_track then
                     local _, note_text = r.GetSetMediaTrackInfo_String(single_track, 'P_NOTES', '', false)
@@ -578,7 +805,7 @@ local function Main()
                             Track.MidiTransposeEdit(single_track, 0, 3)
                         end
                     end
-                end, mt_label_w + 8, nil, has_mt_fx, nil, nil, true, true)
+                end, mt_label_w + 8, nil, has_mt_fx, nil, nil, true, true, nil)
                 if single_track then
                     -- activated: begin session only if FX exists
                     if mt_activated and has_mt_fx then
@@ -747,7 +974,7 @@ local function Main()
                     if has_track_items then
                         pitch_module.HandleSelectedTracksItemsPitchReset()
                     end
-                end, it_label_w + 8, nil, items_modified, items_mixed, has_track_items and track_item_count or 0, nil, false)
+                end, it_label_w + 8, nil, items_modified, items_mixed, has_track_items and track_item_count or 0, nil, false, nil)
                 if not has_track_items then
                     r.ImGui_EndDisabled(ctx)
                     it_changed = false
@@ -788,240 +1015,6 @@ local function Main()
                     end)
                 end
                 UI.Separator(ctx)
-
-                local playback_offset_enabled = false
-                local playback_offset_ms = playback_offset_last_ms or 0.0
-                local playback_offset_unit = playback_offset_last_unit or 'ms'
-                local sr = r.GetSetProjectInfo(0, 'PROJECT_SRATE', 0, false) or 0
-
-                if single_track then
-                    local flag = r.GetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG') or 0
-                    local raw = r.GetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET') or 0.0
-                    local flag_int = math.floor(flag + 0.5)
-                    local disabled = (flag_int & 1) ~= 0
-                    local unit_samples = (flag_int & 2) ~= 0
-                    local track_guid = r.GetTrackGUID(single_track)
-                    playback_offset_enabled = not disabled
-
-                    if playback_offset_enabled or not playback_offset_last_valid or playback_offset_last_guid ~= track_guid then
-                        if unit_samples and sr > 0 then
-                            playback_offset_unit = 'samples'
-                            playback_offset_ms = (raw / sr) * 1000.0
-                        else
-                            playback_offset_unit = 'ms'
-                            playback_offset_ms = raw * 1000.0
-                        end
-                        playback_offset_last_ms = playback_offset_ms
-                        playback_offset_last_unit = playback_offset_unit
-                        playback_offset_last_guid = track_guid
-                        playback_offset_last_valid = true
-                    else
-                        playback_offset_ms = playback_offset_last_ms or playback_offset_ms
-                        playback_offset_unit = playback_offset_last_unit or playback_offset_unit
-                    end
-                else
-                    playback_offset_last_valid = false
-                    playback_offset_last_guid = nil
-                end
-
-                local delay_disabled = not single_track
-                local delay_checked = playback_offset_enabled
-                local delay_changed, delay_value = UI.StyledCheckbox(ctx, 'Delay', delay_checked, false, delay_disabled)
-                if delay_changed and single_track then
-                    Utils.with_undo('Toggle Play Offset', function()
-                        r.Main_OnCommand(42232, 0)
-                    end)
-                end
-
-                r.ImGui_SameLine(ctx, 0, 8)
-
-                local knob_disabled = not single_track
-                if knob_disabled then r.ImGui_BeginDisabled(ctx, true) end
-
-                local knob_value
-                local min_val
-                local max_val
-                if playback_offset_unit == 'samples' and sr > 0 then
-                    local range_samples = sr
-                    min_val = -range_samples
-                    max_val = range_samples
-                    knob_value = (playback_offset_ms / 1000.0) * sr
-                else
-                    local range_ms = 1000.0
-                    min_val = -range_ms
-                    max_val = range_ms
-                    knob_value = playback_offset_ms
-                end
-
-                local knob_changed, knob_new, knob_deactivated, knob_reset = UI.Knob(ctx, 'TrackDelayKnob', knob_value, min_val, max_val, 0.0, nil, playback_offset_enabled)
-
-                if (knob_changed or knob_reset) and single_track then
-                    if knob_reset then
-                        playback_offset_ms = 0.0
-                    else
-                        local new_ms
-                        if playback_offset_unit == 'samples' and sr > 0 then
-                            new_ms = (knob_new / sr) * 1000.0
-                        else
-                            new_ms = knob_new
-                        end
-                        playback_offset_ms = new_ms
-                    end
-
-                    local track_guid = r.GetTrackGUID(single_track)
-                    if track_guid then
-                        playback_offset_last_guid = track_guid
-                        playback_offset_last_ms = playback_offset_ms
-                        playback_offset_last_unit = playback_offset_unit
-                        playback_offset_last_valid = true
-                    end
-
-                    local raw
-                    if playback_offset_unit == 'samples' and sr > 0 then
-                        raw = (playback_offset_ms / 1000.0) * sr
-                    else
-                        raw = playback_offset_ms / 1000.0
-                    end
-
-                    local unit_bit = (playback_offset_unit == 'samples' and sr > 0) and 2 or 0
-                    local disabled_bit = playback_offset_enabled and 0 or 1
-                    local flag = unit_bit | disabled_bit
-                    r.SetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG', flag)
-                    r.SetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET', raw)
-                    r.TrackList_AdjustWindows(0)
-                    r.UpdateArrange()
-                end
-
-                if knob_deactivated and single_track then
-                    Utils.with_undo('Change Play Offset', function() end)
-                end
-
-                if knob_disabled then r.ImGui_EndDisabled(ctx) end
-
-                r.ImGui_SameLine(ctx, 0, 6)
-
-                if single_track and playback_offset_enabled then
-                    local display_value
-                    local display_label
-                    if playback_offset_unit == 'samples' and sr > 0 then
-                        local samples = (playback_offset_ms / 1000.0) * sr
-                        display_value = samples
-                        display_label = string.format('%+d', math.floor(samples + 0.5))
-                    else
-                        display_value = playback_offset_ms
-                        display_label = string.format('%+.1f', playback_offset_ms)
-                    end
-                    if UI.TextButton(ctx, display_label .. '##PlayOffsetValue', 70) then
-                        playback_offset_edit_focus = true
-                        r.ImGui_OpenPopup(ctx, 'PlayOffsetEdit')
-                    end
-                    if r.ImGui_BeginPopup(ctx, 'PlayOffsetEdit') then
-                        if playback_offset_edit_focus then
-                            r.ImGui_SetKeyboardFocusHere(ctx)
-                            playback_offset_edit_focus = false
-                        end
-                        local edit_value = display_value
-                        if playback_offset_unit == 'samples' and sr > 0 then
-                            local changed, new_value, deactivated = UI.DragDoubleInput(ctx, '##PlayOffsetEditSamples', edit_value, 80, 1.0, -sr, sr, '%.0f')
-                            if changed then
-                                edit_value = new_value
-                                playback_offset_ms = (edit_value / sr) * 1000.0
-                            end
-                            if deactivated then
-                                if playback_offset_enabled then
-                                    Utils.with_undo('Set Play Offset', function()
-                                        local samples = math.floor(edit_value + 0.5)
-                                        local raw = samples
-                                        local unit_bit = 2
-                                        local disabled_bit = 0
-                                        local flag = unit_bit | disabled_bit
-                                        r.SetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG', flag)
-                                        r.SetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET', raw)
-                                        r.TrackList_AdjustWindows(0)
-                                        r.UpdateArrange()
-                                    end)
-                                end
-                                r.ImGui_CloseCurrentPopup(ctx)
-                                Utils.DeferClearCursorContext()
-                            end
-                        else
-                            local changed, new_value, deactivated = UI.DragDoubleInput(ctx, '##PlayOffsetEditMs', edit_value, 80, 0.1, -1000.0, 1000.0, '%.1f')
-                            if changed then
-                                edit_value = new_value
-                                playback_offset_ms = edit_value
-                            end
-                            if deactivated then
-                                if playback_offset_enabled then
-                                    Utils.with_undo('Set Play Offset', function()
-                                        local raw = playback_offset_ms / 1000.0
-                                        local unit_bit = 0
-                                        local disabled_bit = 0
-                                        local flag = unit_bit | disabled_bit
-                                        r.SetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG', flag)
-                                        r.SetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET', raw)
-                                        r.TrackList_AdjustWindows(0)
-                                        r.UpdateArrange()
-                                    end)
-                                end
-                                r.ImGui_CloseCurrentPopup(ctx)
-                                Utils.DeferClearCursorContext()
-                            end
-                        end
-                        if r.ImGui_Button(ctx, 'Close') then
-                            r.ImGui_CloseCurrentPopup(ctx)
-                            Utils.DeferClearCursorContext()
-                        end
-                        r.ImGui_EndPopup(ctx)
-                    end
-                end
-
-                r.ImGui_SameLine(ctx, 0, 6)
-
-                local unit_label = ''
-                if playback_offset_enabled then
-                    unit_label = (playback_offset_unit == 'samples') and 'samples' or 'ms'
-                end
-                local units_disabled = (not single_track) or (not playback_offset_enabled)
-                if units_disabled then r.ImGui_BeginDisabled(ctx, true) end
-                if UI.TextButton(ctx, unit_label .. '##PlayOffsetUnits', 60) then
-                    r.ImGui_OpenPopup(ctx, 'PlayOffsetUnits')
-                end
-                if r.ImGui_BeginPopup(ctx, 'PlayOffsetUnits') then
-                    if r.ImGui_MenuItem(ctx, 'Milliseconds', nil, playback_offset_unit == 'ms') and single_track then
-                        if playback_offset_unit ~= 'ms' then
-                            Utils.with_undo('Change Play Offset Units', function()
-                                playback_offset_unit = 'ms'
-                                local unit_bit = 0
-                                local disabled_bit = playback_offset_enabled and 0 or 1
-                                local flag = unit_bit | disabled_bit
-                                r.SetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG', flag)
-                                local raw = playback_offset_ms / 1000.0
-                                r.SetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET', raw)
-                                r.TrackList_AdjustWindows(0)
-                                r.UpdateArrange()
-                            end)
-                        end
-                    end
-                    if r.ImGui_MenuItem(ctx, 'Samples', nil, playback_offset_unit == 'samples') and single_track and sr > 0 then
-                        if playback_offset_unit ~= 'samples' then
-                            Utils.with_undo('Change Play Offset Units', function()
-                                playback_offset_unit = 'samples'
-                                local unit_bit = 2
-                                local disabled_bit = playback_offset_enabled and 0 or 1
-                                local flag = unit_bit | disabled_bit
-                                r.SetMediaTrackInfo_Value(single_track, 'I_PLAY_OFFSET_FLAG', flag)
-                                local samples = (playback_offset_ms / 1000.0) * sr
-                                r.SetMediaTrackInfo_Value(single_track, 'D_PLAY_OFFSET', samples)
-                                r.TrackList_AdjustWindows(0)
-                                r.UpdateArrange()
-                            end)
-                        end
-                    end
-                    r.ImGui_EndPopup(ctx)
-                end
-                if units_disabled then r.ImGui_EndDisabled(ctx) end
-
-                UI.Separator(ctx)
                 local pdc_value = '-'
                 if #tracks == 1 and r.ValidatePtr(tracks[1], 'MediaTrack*') then
                     local perf = Track.GetPerfInfo(tracks[1])
@@ -1057,12 +1050,14 @@ local function Main()
 
             if IsItemSelection(props) then
                 r.ImGui_BeginGroup(ctx)
+                UI.ResetAggHoverRegion()
                 UI.RenderInfoButton(ctx, 40009)
                 UI.Separator(ctx)
                 r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Text(), Theme.get('black'))
                 UI.ColoredButton(ctx, 'N', 20, Theme.get('beige_base'), Theme.get('beige_hover'), Theme.get('beige_active'), function()
                     r.Main_OnCommand(40850, 0)
                 end)
+                UI.QueueStyledTooltipDelayed(ctx, 'fip_item_notes', UI.GetItemNotesButtonTooltipLines(), 1.0)
                 r.ImGui_PopStyleColor(ctx, 1)
                 UI.Separator(ctx)
                 if props.take_type == 'Empty' then
@@ -1105,6 +1100,8 @@ local function Main()
                 UI.Separator(ctx)
                 local is_rate_modified = (props.playback_rate or 1.0) ~= 1.0
                 UI.StyledResetButton(ctx, 'Rate:', 40, is_rate_modified, function()
+                    rate_value_edit.active = false
+                    rate_value_edit.want_focus = false
                     props.playback_rate = 1.0
                     props.bpm = r.Master_GetTempo()
                     Utils.with_undo('Reset Rate', function()
@@ -1119,59 +1116,164 @@ local function Main()
                     core.SetState(state2)
                 end)
                 r.ImGui_SameLine(ctx, 0, 2)
-                local formatted_rate = Item.FormatRateValue(props.playback_rate or 1.0)
-                if UI.TextButton(ctx, formatted_rate .. '##RateDisplay', 70) then
-                    r.ImGui_OpenPopup(ctx, 'RateEdit')
-                end
-                if r.ImGui_BeginPopup(ctx, 'RateEdit') then
-                    local rate_changed, rate, rate_deactivated = UI.DragDoubleInput(ctx, '##RatePopup', props.playback_rate or 1.0, 100, 0.01, 0.01, 10, '%.6f')
-                    if rate_changed then
-                        props.playback_rate = rate
-                        props.bpm = r.Master_GetTempo() / rate
-                        if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
-                            r.FIP_SetSelectedItemsPlaybackRate(tostring(rate), 0)
-                        else
-                            r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                if not rate_value_edit.active then
+                    local formatted_rate = Item.FormatRateValue(props.playback_rate or 1.0)
+                    if UI.TextButton(ctx, formatted_rate .. '##RateDisplay', 70) then
+                        local mods = r.ImGui_GetKeyMods(ctx)
+                        local cmd_held = (mods & r.ImGui_Mod_Super()) ~= 0 or (mods & r.ImGui_Mod_Ctrl()) ~= 0
+                        if cmd_held then
+                            rate_value_edit.active = true
+                            rate_value_edit.text = string.format('%.6f', props.playback_rate or 1.0)
+                            rate_value_edit.want_focus = true
                         end
                     end
-                    if r.ImGui_Button(ctx, 'Close') then
-                        r.ImGui_CloseCurrentPopup(ctx)
-                        Utils.DeferClearCursorContext()
+                else
+                    local w_rate = 70
+                    r.ImGui_SetNextItemWidth(ctx, w_rate)
+                    if rate_value_edit.want_focus then
+                        r.ImGui_SetKeyboardFocusHere(ctx)
+                        rate_value_edit.want_focus = false
                     end
-                    r.ImGui_EndPopup(ctx)
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), Theme.get('gray_42'))
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), Theme.get('gray_74'))
+                    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(), 4)
+                    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(), 6, 4)
+                    local input_flags = r.ImGui_InputTextFlags_CharsDecimal()
+                                      | r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                      | r.ImGui_InputTextFlags_AutoSelectAll()
+                    local rate_submitted, new_text = r.ImGui_InputText(ctx, '##RateValue', rate_value_edit.text, input_flags)
+                    rate_value_edit.text = new_text
+                    local rate_d = Utils.ClearCursorContextOnDeactivation(ctx)
+                    r.ImGui_PopStyleVar(ctx, 2)
+                    r.ImGui_PopStyleColor(ctx, 2)
+                    if rate_submitted or rate_d then
+                        local normalized = ((rate_value_edit.text or ''):gsub(',', '.'))
+                        local parsed = tonumber(normalized)
+                        if parsed then
+                            if parsed < 0.01 then parsed = 0.01 end
+                            if parsed > 100 then parsed = 100 end
+                            props.playback_rate = parsed
+                            props.bpm = r.Master_GetTempo() / parsed
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate(tostring(parsed), 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
+                            Utils.with_undo('Change Rate', function() end)
+                        end
+                        rate_value_edit.active = false
+                    end
                 end
                 UI.Separator(ctx)
                 local project_tempo = r.Master_GetTempo()
                 local current_bpm = props.bpm or project_tempo
                 local bpm_modified = math.abs(current_bpm - project_tempo) > 0.0001
-                local bmp_changed, bpm, bpm_deactivated = UI.VerticalPitchControl(ctx, 'BPM:', current_bpm, 50, 1.0, 20, 999, '%.0f', function()
-                    props.bpm = project_tempo
-                    props.playback_rate = 1.0
-                    Utils.with_undo('Reset BPM', function()
-                        if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
-                            r.FIP_SetSelectedItemsPlaybackRate("1.0", 0)
+                if not bpm_value_edit.active then
+                    local bmp_changed, bpm, bpm_deactivated = UI.VerticalPitchControl(ctx, 'BPM:', current_bpm, 50, 0.1, 20, 999, '%.0f', function()
+                        bpm_value_edit.active = false
+                        bpm_value_edit.want_focus = false
+                        props.bpm = project_tempo
+                        props.playback_rate = 1.0
+                        Utils.with_undo('Reset BPM', function()
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate("1.0", 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
+                        end)
+                    end, 40, nil, bpm_modified, false, item_count, nil, false, function()
+                        bpm_value_edit.active = true
+                        bpm_value_edit.text = string.format('%.0f', math.floor((current_bpm or project_tempo) + 0.5))
+                        bpm_value_edit.want_focus = true
+                    end, nil)
+                    if bmp_changed then
+                        if bpm <= 0 then
+                            props.bpm = project_tempo
+                            props.playback_rate = 1.0
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate("1.0", 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
+                            Utils.with_undo('Reset BPM', function() end)
                         else
-                            r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            props.bpm = bpm
+                            props.playback_rate = project_tempo / bpm
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate(tostring(props.playback_rate), 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
                         end
-                    end)
-                end, 40, nil, bpm_modified, false, item_count, nil, false)
-                if bmp_changed then
-                    props.bpm = bpm
-                    props.playback_rate = project_tempo / bpm
-                    if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
-                        r.FIP_SetSelectedItemsPlaybackRate(tostring(props.playback_rate), 0)
-                    else
-                        r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
                     end
-                end
-                if bmp_deactivated then
-                    Utils.with_undo('Change BPM', function() end)
+                    if bpm_deactivated then
+                        Utils.with_undo('Change BPM', function() end)
+                    end
+                else
+                    local w_bpm = 50
+                    UI.StyledResetButton(ctx, 'BPM:', 40, bpm_modified, function()
+                        bpm_value_edit.active = false
+                        bpm_value_edit.want_focus = false
+                        props.bpm = project_tempo
+                        props.playback_rate = 1.0
+                        Utils.with_undo('Reset BPM', function()
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate("1.0", 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
+                        end)
+                    end, false, false)
+                    if item_count and item_count > 1 then
+                        UI.ExtendAggHoverRegion(ctx)
+                    end
+                    r.ImGui_SameLine(ctx, 0, 2)
+                    r.ImGui_SetNextItemWidth(ctx, w_bpm)
+                    if bpm_value_edit.want_focus then
+                        r.ImGui_SetKeyboardFocusHere(ctx)
+                        bpm_value_edit.want_focus = false
+                    end
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), Theme.get('gray_42'))
+                    r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), Theme.get('gray_74'))
+                    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(), 4)
+                    r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(), 6, 4)
+                    local input_flags = r.ImGui_InputTextFlags_CharsDecimal()
+                                      | r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                      | r.ImGui_InputTextFlags_AutoSelectAll()
+                    local bpm_submitted, new_text = r.ImGui_InputText(ctx, '##BpmValue', bpm_value_edit.text, input_flags)
+                    bpm_value_edit.text = new_text
+                    local bpm_d = Utils.ClearCursorContextOnDeactivation(ctx)
+                    r.ImGui_PopStyleVar(ctx, 2)
+                    r.ImGui_PopStyleColor(ctx, 2)
+                    local commit = bpm_submitted or bpm_d
+                    if commit then
+                        local normalized = ((bpm_value_edit.text or ''):gsub(',', '.'))
+                        local parsed = tonumber(normalized)
+                        if parsed then
+                            if parsed < 20 then parsed = 20 end
+                            if parsed > 999 then parsed = 999 end
+                            props.bpm = parsed
+                            props.playback_rate = project_tempo / parsed
+                            if r.APIExists and r.APIExists("FIP_SetSelectedItemsPlaybackRate") then
+                                r.FIP_SetSelectedItemsPlaybackRate(tostring(props.playback_rate), 0)
+                            else
+                                r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPlaybackRate not available\n")
+                            end
+                            Utils.with_undo('Change BPM', function() end)
+                        end
+                        bpm_value_edit.active = false
+                    end
+                    if item_count and item_count > 1 then
+                        UI.DrawAggregationOutline(ctx, nil, 4, 0)
+                        UI.ExtendAggHoverRegion(ctx)
+                    end
                 end
                 UI.Separator(ctx)
                 local preserve_value = props.preserve_pitch
                 local preserve_mixed = (preserve_value == nil)
                 local preserve_disabled = (props.take_type == 'MIDI')
                 local preserve_changed, preserve = UI.StyledCheckbox(ctx, 'Preserve', preserve_value, preserve_mixed, preserve_disabled)
+                UI.QueueStyledTooltipDelayed(ctx, 'fip_preserve_pitch', UI.GetPreservePitchTooltipLines(), 1.0)
                 if preserve_changed and not preserve_disabled then
                     props.preserve_pitch = preserve
                     Item.UpdatePreservePitch(items, preserve)
@@ -1183,7 +1285,6 @@ local function Main()
                 TimestrechWidget.Render(ctx, props, items, Item, UI.StyledResetButton)
                 UI.Separator(ctx)
                 if props.take_type == 'Audio' or props.take_type == 'MIDI' or props.take_type == 'Mult' then
-                    if item_count > 1 then UI.ResetAggHoverRegion() end
                     local is_multi = (item_count > 1)
                     local transpose_midi_mode = (r.GetExtState("Frenkie_Inspector", "TransposeMIDI") == "1")
                     -- Use Delta/Accumulator mode for Multi-selection OR when Transpose MIDI is active (since we need relative edits for MIDI)
@@ -1208,7 +1309,9 @@ local function Main()
                         base_pitch = is_mixed and 0 or tonumber(pitch_str or "0") or 0
                         is_modified = (not is_mixed) and math.abs(base_pitch) > 0.001
                     end
-                    local pitch_changed, new_pitch, pitch_deactivated = UI.VerticalPitchControl(ctx, 'Pitch:', base_pitch, 50, 0.1, -96, 96, '%.0f st', function()
+                    local function pitch_reset_action()
+                        pitch_value_edit.active = false
+                        pitch_value_edit.want_focus = false
                         local transpose_midi_mode_cb = (r.GetExtState("Frenkie_Inspector", "TransposeMIDI") == "1")
                         if props.take_type == 'MIDI' and transpose_midi_mode_cb then
                             if r.APIExists and r.APIExists("FIP_SetSelectedItemsPitch") then
@@ -1235,10 +1338,10 @@ local function Main()
                                 props.pitch = 0
                             end
                         end
-                    end, nil, false, is_modified, is_mixed, item_count, nil, false)
-                    if pitch_changed then
+                    end
+                    local function apply_pitch_value(new_pitch_val)
                         if use_delta_mode then
-                            local delta = new_pitch - base_pitch
+                            local delta = new_pitch_val - base_pitch
                             if math.abs(delta) > 0.0001 then
                                 if r.APIExists and r.APIExists("FIP_ApplyAddSelectedItemsPitchDeltaVal") then
                                     r.FIP_ApplyAddSelectedItemsPitchDeltaVal(tostring(delta), 0)
@@ -1246,34 +1349,100 @@ local function Main()
                                     r.ShowConsoleMsg("ERROR: FIP_ApplyAddSelectedItemsPitchDeltaVal not available\n")
                                 end
                             end
-                            props.pitch = new_pitch
+                            props.pitch = new_pitch_val
                         else
                             if r.APIExists and r.APIExists("FIP_SetSelectedItemsPitch") then
-                                r.FIP_SetSelectedItemsPitch(tostring(new_pitch), 0)
+                                r.FIP_SetSelectedItemsPitch(tostring(new_pitch_val), 0)
                             else
                                 r.ShowConsoleMsg("ERROR: FIP_SetSelectedItemsPitch not available\n")
                             end
-                            props.pitch = new_pitch
+                            props.pitch = new_pitch_val
                             state.cached_props = Item.GetAggregatedProps(items)
                             core.SetState(state)
                         end
                     end
-                    if pitch_deactivated then
-                        if use_delta_mode then
-                            pitch_module.FinalizeMIDITranspose(items)
-                            -- Force refresh properties to ensure UI snaps back to 0 (since Item Pitch didn't change)
-                            state.cached_props = Item.GetAggregatedProps(items)
-                            core.SetState(state)
-                        else
-                            Utils.with_undo("Change Pitch", function() end)
+                    if not pitch_value_edit.active then
+                        local pitch_changed, new_pitch, pitch_deactivated = UI.VerticalPitchControl(ctx, 'Pitch:', base_pitch, 50, 0.1, -96, 96, '%.0f st', pitch_reset_action, nil, false, is_modified, is_mixed, item_count, nil, false, function()
+                            pitch_value_edit.active = true
+                            pitch_value_edit.text = string.format('%.0f', math.floor((base_pitch or 0) + 0.5))
+                            pitch_value_edit.want_focus = true
+                        end, UI.GetItemPitchTooltipLines())
+                        if pitch_changed then
+                            apply_pitch_value(new_pitch)
                         end
+                        if pitch_deactivated then
+                            if use_delta_mode then
+                                pitch_module.FinalizeMIDITranspose(items)
+                                state.cached_props = Item.GetAggregatedProps(items)
+                                core.SetState(state)
+                            else
+                                Utils.with_undo("Change Pitch", function() end)
+                            end
+                        end
+                    else
+                        local pit_tt = UI.GetItemPitchTooltipLines()
+                        UI.StyledResetButton(ctx, 'Pitch:', 40, is_modified, pitch_reset_action, nil, is_mixed)
+                        local pr1x1, pr1y1 = r.ImGui_GetItemRectMin(ctx)
+                        local pr1x2, pr1y2 = r.ImGui_GetItemRectMax(ctx)
+                        if item_count and item_count > 1 then
+                            UI.ExtendAggHoverRegion(ctx)
+                        end
+                        r.ImGui_SameLine(ctx, 0, 2)
+                        local w_pitch = 50
+                        r.ImGui_SetNextItemWidth(ctx, w_pitch)
+                        if pitch_value_edit.want_focus then
+                            r.ImGui_SetKeyboardFocusHere(ctx)
+                            pitch_value_edit.want_focus = false
+                        end
+                        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_FrameBg(), Theme.get('gray_42'))
+                        r.ImGui_PushStyleColor(ctx, r.ImGui_Col_Border(), Theme.get('gray_74'))
+                        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FrameRounding(), 4)
+                        r.ImGui_PushStyleVar(ctx, r.ImGui_StyleVar_FramePadding(), 6, 4)
+                        local input_flags = r.ImGui_InputTextFlags_CharsDecimal()
+                                          | r.ImGui_InputTextFlags_EnterReturnsTrue()
+                                          | r.ImGui_InputTextFlags_AutoSelectAll()
+                        local pitch_submitted, new_text = r.ImGui_InputText(ctx, '##PitchValue', pitch_value_edit.text, input_flags)
+                        pitch_value_edit.text = new_text
+                        local pitch_d = Utils.ClearCursorContextOnDeactivation(ctx)
+                        r.ImGui_PopStyleVar(ctx, 2)
+                        r.ImGui_PopStyleColor(ctx, 2)
+                        local pr2x1, pr2y1 = r.ImGui_GetItemRectMin(ctx)
+                        local pr2x2, pr2y2 = r.ImGui_GetItemRectMax(ctx)
+                        if pitch_submitted or pitch_d then
+                            local normalized = ((pitch_value_edit.text or ''):gsub(',', '.'))
+                            local parsed = tonumber(normalized)
+                            if parsed then
+                                if parsed < -96 then parsed = -96 end
+                                if parsed > 96 then parsed = 96 end
+                                apply_pitch_value(parsed)
+                                if use_delta_mode then
+                                    pitch_module.FinalizeMIDITranspose(items)
+                                    state.cached_props = Item.GetAggregatedProps(items)
+                                    core.SetState(state)
+                                else
+                                    Utils.with_undo("Change Pitch", function() end)
+                                end
+                            end
+                            pitch_value_edit.active = false
+                        end
+                        if item_count and item_count > 1 then
+                            UI.DrawAggregationOutline(ctx, nil, 4, 0)
+                            UI.ExtendAggHoverRegion(ctx)
+                        end
+                        local mx, my = r.ImGui_GetMousePos(ctx)
+                        local pux1 = math.min(pr1x1, pr2x1)
+                        local puy1 = math.min(pr1y1, pr2y1)
+                        local pux2 = math.max(pr1x2, pr2x2)
+                        local puy2 = math.max(pr1y2, pr2y2)
+                        local pin = mx >= pux1 and mx <= pux2 and my >= puy1 and my <= puy2
+                        UI.QueueStyledTooltipDelayedGeneric(ctx, 'fip_pitch_edit', pit_tt, 1.0, pin)
                     end
                     UI.Separator(ctx)
                 end
                 Fader.RenderFaders(ctx, items, props, bar_color, UI)
                 
                 if item_count > 1 then
-                    UI.ShowTooltipDelayedIfHoveredInAggRegion(ctx, 'agg_unified', 'Режим Агрегации:\n\nВ данном режиме все внесённые изменения\nс собственными значениями выделенных объектов', 0.5)
+                    UI.ShowTooltipDelayedIfHoveredInAggRegion(ctx, 'agg_unified', "Aggregation Mode\nEdits add to each selected item's values.", 1.0)
                 end
                 UI.Separator(ctx)
                 local has_fx = (item_count == 1) and Item.ItemHasFX(items[1]) or false
@@ -1315,6 +1484,7 @@ local function Main()
                 else
                     UI.StyledButton(ctx, 'FX', 30, fx_action)
                 end
+                UI.QueueStyledTooltipDelayed(ctx, 'fip_fx_btn', UI.GetFxChainButtonTooltipLines(), 1.0)
                 UI.Separator(ctx)
                 local loop_value = props.loop
                 local loop_mixed = (loop_value == nil)
@@ -1358,6 +1528,32 @@ local function Main()
                 UI.Separator(ctx)
                 r.ImGui_EndGroup(ctx)
             end
+            end
+        end
+        if not fip_fxsnap_strip_committed then
+            fip_fxsnap_row_screen_rect.valid = false
+        end
+        do
+            local hf = r.ImGui_HoveredFlags_ChildWindows()
+                      | r.ImGui_HoveredFlags_AllowWhenBlockedByActiveItem()
+                      | r.ImGui_HoveredFlags_AllowWhenBlockedByPopup()
+            local win_hov = r.ImGui_IsWindowHovered(ctx, hf)
+            local any_item = true
+            local ok_any = pcall(function()
+                any_item = r.ImGui_IsAnyItemHovered(ctx)
+            end)
+            if not ok_any then any_item = true end
+            if fip_fxsnap_row_screen_rect.valid then
+                local R = fip_fxsnap_row_screen_rect
+                local mx, my = r.ImGui_GetMousePos(ctx)
+                if mx >= R.x1 and mx <= R.x2 and my >= R.y1 and my <= R.y2 then
+                    any_item = true
+                end
+            end
+            if win_hov and not any_item then
+                UI.QueueStyledTooltipDelayedGeneric(ctx, 'fip_panel_bg', UI.GetPanelBackgroundTooltipLines(), 1.0, true)
+            else
+                UI.ClearStyledTooltipHoverState('fip_panel_bg')
             end
         end
         r.ImGui_End(ctx)

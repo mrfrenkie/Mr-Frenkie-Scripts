@@ -1,4 +1,7 @@
-desc:MIDI Transpose and Monitor
+-- @noindex
+local JSFX = {}
+
+JSFX.MIDI_TRANSPOSE_UTILITY_JSFX = [[desc:MIDI Transpose and Monitor
 //tags: MIDI processing utility
 //author: Mr. Frenkie (Modified)
 
@@ -764,47 +767,75 @@ gfx_y = pad_top + str_h + pad_gap;
     gfx_r = 0.8; gfx_g = 0.8; gfx_b = 0.8;
   );
 
+  // First, check if we need to add bass for measurement
+  slash_pos = find_char(chord_line_a, '/');
+  will_add_bass = (slash_pos < 0 && strlen(chord_line_a) > 0 && last_is_inv);
+  
+  // Measure total width (chord + optional bass)
   font_sz = chord_base_font_sz;
   gfx_setfont(2, "Arial", font_sz);
-  draw_str = #draw_str;
-  strcpy(draw_str, chord_line_a);
-  (note_count > 1 && min_note != chord_root) ? (
-    slash_pos = find_char(draw_str, '/');
-    (slash_pos < 0) ? (
-      pitch_to_name(chord_root, #tmp_root_name);
-      chord_bass_name(#tmp_root_name, chord_root, min_note, #tmp_bass_name);
-      strcat(draw_str, "/");
-      strcat(draw_str, #tmp_bass_name);
-    );
+  gfx_measurestr(chord_line_a, cw_chord, ch);
+  will_add_bass ? (
+    gfx_measurestr("/", cw_slash, ch);
+    gfx_measurestr(#last_inv_name, cw_bass, ch);
+    cw = cw_chord + cw_slash + cw_bass;
+  ) : (
+    cw = cw_chord;
   );
-  gfx_measurestr(draw_str, cw, ch);
-  cw > gfx_w - 16 ? (font_sz = 30; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-  cw > gfx_w - 16 ? (font_sz = 26; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-  cw > gfx_w - 16 ? (font_sz = 22; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
+  
+  // Adjust font size based on TOTAL width
+  cw > gfx_w - 16 ? (
+    font_sz = 30; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 26; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 22; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 20; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 18; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 16; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
+  cw > gfx_w - 16 ? (
+    font_sz = 14; gfx_setfont(2, "Arial", font_sz);
+    gfx_measurestr(chord_line_a, cw_chord, ch);
+    will_add_bass ? (gfx_measurestr("/", cw_slash, ch); gfx_measurestr(#last_inv_name, cw_bass, ch); cw = cw_chord + cw_slash + cw_bass;) : (cw = cw_chord;);
+  );
 
-  cw > gfx_w - 16 ? (font_sz = 20; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-  cw > gfx_w - 16 ? (font_sz = 18; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-  cw > gfx_w - 16 ? (font_sz = 16; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-  cw > gfx_w - 16 ? (font_sz = 14; gfx_setfont(2, "Arial", font_sz); gfx_measurestr(draw_str, cw, ch););
-
-  gfx_measurestr(draw_str, cw, ch);
+  // Center based on TOTAL width
   gfx_x = (gfx_w - cw) / 2;
-  gfx_drawstr(draw_str);
-
-  // Draw inversion bass overlay if missing in main line
-  slash_pos = find_char(chord_line_a, '/');
-  (slash_pos < 0 && strlen(chord_line_a) > 0 && last_is_inv) ? (
+  
+  // Draw exactly as before (multiple calls)
+  gfx_drawstr(chord_line_a);
+  will_add_bass ? (
     gfx_drawstr("/");
     gfx_drawstr(#last_inv_name);
   );
 
-  // Debug line
-  gfx_setfont(2, "Arial", 12);
-  gfx_r = 0.7; gfx_g = 0.7; gfx_b = 0.7;
-  gfx_measurestr(#debug_line, cw, ch);
-  gfx_x = 10;
-  gfx_y = pad_top + str_h + pad_gap + chord_line2_gap;
-  gfx_drawstr(#debug_line);
+  // Debug line (optional - uncomment if needed)
+  // gfx_setfont(2, "Arial", 12);
+  // gfx_r = 0.7; gfx_g = 0.7; gfx_b = 0.7;
+  // gfx_x = 10;
+  // gfx_y = pad_top + str_h + pad_gap + chord_line2_gap;
+  // gfx_drawstr(#debug_line);
 
 
 );
@@ -821,4 +852,495 @@ sq_y = pad_top + (str_h - sq_h) / 2;
   gfx_a = 0.2 + 0.8 * t;
   gfx_r = 1; gfx_g = 1; gfx_b = 0;
   gfx_rect(sq_x, sq_y, sq_w, sq_h);
+);]]
+
+JSFX.MIDI_TRANSPOSE_UTILITY_PRESET_INI = [[[General]
+NbPresets=1
+
+[Preset0]
+Data=30202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D20225472616E73706F757365205574696C69747920666F72204974656D2050726F706572746965732232
+Len=168
+Name=Transpouse Utility for Item Properties
+]]
+
+JSFX.LOW_CUT_24DB_JSFX = [[desc:Mr. Frenkie/Low Cut 24 dB/oct
+options:no_meter
+in_pin:Left
+in_pin:Right
+out_pin:Left
+out_pin:Right
+
+slider1:20<20,20000,1:log>Cutoff (Hz)
+slider2:1<0,1,1>Slope
+
+@init
+gfx_ext_retina == 0 ? gfx_ext_retina = 1;
+gfx_ext_flags |= 0x100 | 0x200;
+q1_24 = 0.54119610;
+q2_24 = 1.30656296;
+q_12 = 0.70710678;
+prev_sr = srate;
+function clamp_freq(f)
+(
+  f = f < 20 ? 20 : f;
+  fmax = srate*0.499;
+  f = f > fmax ? fmax : f;
 );
+function hp_coeffs_1(f, q)
+local(w0, cw, sw, alpha, a0)
+(
+  f = clamp_freq(f);
+  w0 = 2*$pi*f/srate;
+  cw = cos(w0);
+  sw = sin(w0);
+  alpha = sw/(2*q);
+  a0 = 1 + alpha;
+  b0_1 = (1 + cw)/2/a0;
+  b1_1 = -(1 + cw)/a0;
+  b2_1 = (1 + cw)/2/a0;
+  a1_1 = -2*cw/a0;
+  a2_1 = (1 - alpha)/a0;
+);
+function hp_coeffs_2(f)
+local(w0, cw, sw, alpha, a0)
+(
+  f = clamp_freq(f);
+  w0 = 2*$pi*f/srate;
+  cw = cos(w0);
+  sw = sin(w0);
+  alpha = sw/(2*q2_24);
+  a0 = 1 + alpha;
+  b0_2 = (1 + cw)/2/a0;
+  b1_2 = -(1 + cw)/a0;
+  b2_2 = (1 + cw)/2/a0;
+  a1_2 = -2*cw/a0;
+  a2_2 = (1 - alpha)/a0;
+);
+function hp_update(f)
+(
+  slider2 >= 0.5 ? (
+    hp_coeffs_1(f, q1_24);
+    hp_coeffs_2(f);
+  ) : (
+    hp_coeffs_1(f, q_12);
+  );
+);
+// slider1 is Hz directly
+freq_cut = clamp_freq(slider1);
+hp_update(freq_cut);
+x1L1 = 0; x2L1 = 0; y1L1 = 0; y2L1 = 0;
+x1L2 = 0; x2L2 = 0; y1L2 = 0; y2L2 = 0;
+x1R1 = 0; x2R1 = 0; y1R1 = 0; y2R1 = 0;
+x1R2 = 0; x2R2 = 0; y1R2 = 0; y2R2 = 0;
+drag_active = 0;
+drag_prev_x = 0;
+gfx_setfont(1, "Arial", 24);
+
+@slider
+// slider1 is Hz directly
+freq_cut = clamp_freq(slider1);
+hp_update(freq_cut);
+
+@block
+prev_sr != srate ? (
+  prev_sr = srate;
+  freq_cut = clamp_freq(slider1);
+  hp_update(freq_cut);
+);
+
+@sample
+inL = spl0;
+inR = spl1;
+slider1 <= 20 ? (
+  spl0 = inL;
+  spl1 = inR;
+  x1L1 = 0; x2L1 = 0; y1L1 = 0; y2L1 = 0;
+  x1L2 = 0; x2L2 = 0; y1L2 = 0; y2L2 = 0;
+  x1R1 = 0; x2R1 = 0; y1R1 = 0; y2R1 = 0;
+  x1R2 = 0; x2R2 = 0; y1R2 = 0; y2R2 = 0;
+) : (
+  o1L = b0_1*inL + b1_1*x1L1 + b2_1*x2L1 - a1_1*y1L1 - a2_1*y2L1;
+  x2L1 = x1L1;
+  x1L1 = inL;
+  y2L1 = y1L1;
+  y1L1 = o1L;
+  slider2 >= 0.5 ? (
+    o2L = b0_2*o1L + b1_2*x1L2 + b2_2*x2L2 - a1_2*y1L2 - a2_2*y2L2;
+    x2L2 = x1L2;
+    x1L2 = o1L;
+    y2L2 = y1L2;
+    y1L2 = o2L;
+  );
+  spl0 = slider2 >= 0.5 ? o2L : o1L;
+
+  o1R = b0_1*inR + b1_1*x1R1 + b2_1*x2R1 - a1_1*y1R1 - a2_1*y2R1;
+  x2R1 = x1R1;
+  x1R1 = inR;
+  y2R1 = y1R1;
+  y1R1 = o1R;
+  slider2 >= 0.5 ? (
+    o2R = b0_2*o1R + b1_2*x1R2 + b2_2*x2R2 - a1_2*y1R2 - a2_2*y2R2;
+    x2R2 = x1R2;
+    x1R2 = o1R;
+    y2R2 = y1R2;
+    y1R2 = o2R;
+  );
+  spl1 = slider2 >= 0.5 ? o2R : o1R;
+);
+
+@gfx 150 40
+embedded = gfx_ext_flags & 1;
+gfx_clear = 0x1a1a1a;
+gfx_setfont(1, "Arial", 24);
+// slider1 is Hz directly
+cur_f = clamp_freq(slider1);
+slope_24 = slider2 >= 0.5;
+embedded ? (
+  sprintf(#hp_str, "HP");
+  slope_24 ? sprintf(#order_str, "4") : sprintf(#order_str, "2");
+  sprintf(#colon_str, ": ");
+  cur_f >= 1000 ? (
+    sprintf(#freq_str, "%.1f kHz", cur_f/1000);
+  ) : (
+    sprintf(#freq_str, "%d Hz", cur_f);
+  );
+) : (
+  sprintf(#prefix_str, "Low Cut: ");
+  cur_f >= 1000 ? (
+    slope_24 ? sprintf(#freq_str, "%.1f kHz 24dB", cur_f/1000) : sprintf(#freq_str, "%.1f kHz 12dB", cur_f/1000);
+  ) : (
+    slope_24 ? sprintf(#freq_str, "%d Hz 24dB", cur_f) : sprintf(#freq_str, "%d Hz 12dB", cur_f);
+  );
+);
+pad_left = 8;
+pad_gap = 0;
+embedded ? (
+  gfx_measurestr(#hp_str, hp_w, str_h);
+  gfx_measurestr(#order_str, order_w, str_h);
+  gfx_measurestr(#colon_str, colon_w, str_h);
+  gfx_measurestr(#freq_str, freq_w, str_h);
+  freq_zone_left = pad_left + hp_w + order_w + colon_w + pad_gap;
+) : (
+  gfx_measurestr(#prefix_str, prefix_w, str_h);
+  gfx_measurestr(#freq_str, freq_w, str_h);
+  freq_zone_left = pad_left + prefix_w + pad_gap;
+);
+gfx_y = (gfx_h - str_h) * 0.5;
+gfx_x = pad_left;
+embedded ? (
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#hp_str);
+  gfx_x = pad_left + hp_w;
+  gfx_r = 0.88; gfx_g = 0.88; gfx_b = 0.88; gfx_a = 1;
+  gfx_drawstr(#order_str);
+  gfx_x = pad_left + hp_w + order_w;
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#colon_str);
+) : (
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#prefix_str);
+);
+freq_zone_width = gfx_w - freq_zone_left;
+// Convert Hz to norm for color: norm = log(Hz/20) / log(1000)
+freq_norm = log(cur_f / 20) / log(1000);
+hue = freq_norm * 0.78;
+hsl_L = 0.75;
+hsl_S = 1;
+hsl_q = hsl_L < 0.5 ? hsl_L * (1 + hsl_S) : hsl_L + hsl_S - hsl_L * hsl_S;
+hsl_p = 2 * hsl_L - hsl_q;
+function hue2rgb(p, q, t)
+(
+  t = t < 0 ? t + 1 : t;
+  t = t > 1 ? t - 1 : t;
+  t < 0.166667 ? (p + (q - p) * 6 * t) : (
+  t < 0.5 ? q : (
+  t < 0.666667 ? (p + (q - p) * (0.666667 - t) * 6) : p));
+);
+gfx_r = hue2rgb(hsl_p, hsl_q, hue + 0.333333);
+gfx_g = hue2rgb(hsl_p, hsl_q, hue);
+gfx_b = hue2rgb(hsl_p, hsl_q, hue - 0.333333);
+gfx_a = 1;
+gfx_x = freq_zone_left;
+gfx_drawstr(#freq_str);
+!embedded ? (
+  mouse_wheel != 0 ? (
+    // slider1 is Hz with native log, convert to norm for smooth control
+    norm = log(slider1 / 20) / log(1000);
+    norm = norm + mouse_wheel * 0.0008;
+    norm = norm < 0 ? 0 : norm;
+    norm = norm > 1 ? 1 : norm;
+    slider1 = 20 * (1000 ^ norm);
+    slider_automate(slider1);
+    mouse_wheel = 0;
+  );
+  (gfx_mouse_cap & 1) ? (
+    drag_active == 0 ? (
+      drag_active = 1;
+      drag_prev_x = gfx_mouse_x;
+    );
+    dx = gfx_mouse_x - drag_prev_x;
+    drag_prev_x = gfx_mouse_x;
+    // slider1 is Hz with native log, convert to norm for smooth control
+    norm = log(slider1 / 20) / log(1000);
+    norm = norm + dx / (gfx_w > 0 ? gfx_w : 150);
+    norm = norm < 0 ? 0 : norm;
+    norm = norm > 1 ? 1 : norm;
+    slider1 = 20 * (1000 ^ norm);
+    slider_automate(slider1);
+  ) : (
+    drag_active = 0;
+  );
+);
+]]
+
+JSFX.HIGH_CUT_24DB_JSFX = [[desc:Mr. Frenkie/High Cut 24 dB/oct
+options:no_meter
+in_pin:Left
+in_pin:Right
+out_pin:Left
+out_pin:Right
+
+slider1:20000<20,20000,1:log>Cutoff (Hz)
+slider2:1<0,1,1>Slope
+
+@init
+gfx_ext_retina == 0 ? gfx_ext_retina = 1;
+gfx_ext_flags |= 0x100 | 0x200;
+q1_24 = 0.54119610;
+q2_24 = 1.30656296;
+q_12 = 0.70710678;
+prev_sr = srate;
+function clamp_freq(f)
+(
+  f = f < 20 ? 20 : f;
+  fmax = srate*0.499;
+  f = f > fmax ? fmax : f;
+);
+function lp_coeffs_1(f, q)
+local(w0, cw, sw, alpha, a0)
+(
+  f = clamp_freq(f);
+  w0 = 2*$pi*f/srate;
+  cw = cos(w0);
+  sw = sin(w0);
+  alpha = sw/(2*q);
+  a0 = 1 + alpha;
+  b0_1 = (1 - cw)/2/a0;
+  b1_1 = (1 - cw)/a0;
+  b2_1 = (1 - cw)/2/a0;
+  a1_1 = -2*cw/a0;
+  a2_1 = (1 - alpha)/a0;
+);
+function lp_coeffs_2(f)
+local(w0, cw, sw, alpha, a0)
+(
+  f = clamp_freq(f);
+  w0 = 2*$pi*f/srate;
+  cw = cos(w0);
+  sw = sin(w0);
+  alpha = sw/(2*q2_24);
+  a0 = 1 + alpha;
+  b0_2 = (1 - cw)/2/a0;
+  b1_2 = (1 - cw)/a0;
+  b2_2 = (1 - cw)/2/a0;
+  a1_2 = -2*cw/a0;
+  a2_2 = (1 - alpha)/a0;
+);
+function lp_update(f)
+(
+  slider2 >= 0.5 ? (
+    lp_coeffs_1(f, q1_24);
+    lp_coeffs_2(f);
+  ) : (
+    lp_coeffs_1(f, q_12);
+  );
+);
+// slider1 is norm (0-1), convert to Hz using standard DSP log
+freq_cut = clamp_freq(slider1);
+lp_update(freq_cut);
+x1L1 = 0; x2L1 = 0; y1L1 = 0; y2L1 = 0;
+x1L2 = 0; x2L2 = 0; y1L2 = 0; y2L2 = 0;
+x1R1 = 0; x2R1 = 0; y1R1 = 0; y2R1 = 0;
+x1R2 = 0; x2R2 = 0; y1R2 = 0; y2R2 = 0;
+drag_active = 0;
+drag_prev_x = 0;
+gfx_setfont(1, "Arial", 24);
+
+@slider
+freq_cut = clamp_freq(slider1);
+lp_update(freq_cut);
+
+@block
+prev_sr != srate ? (
+  prev_sr = srate;
+  freq_cut = clamp_freq(slider1);
+  lp_update(freq_cut);
+);
+
+@sample
+inL = spl0;
+inR = spl1;
+slider1 >= 20000 ? (
+  spl0 = inL;
+  spl1 = inR;
+  x1L1 = 0; x2L1 = 0; y1L1 = 0; y2L1 = 0;
+  x1L2 = 0; x2L2 = 0; y1L2 = 0; y2L2 = 0;
+  x1R1 = 0; x2R1 = 0; y1R1 = 0; y2R1 = 0;
+  x1R2 = 0; x2R2 = 0; y1R2 = 0; y2R2 = 0;
+) : (
+  o1L = b0_1*inL + b1_1*x1L1 + b2_1*x2L1 - a1_1*y1L1 - a2_1*y2L1;
+  x2L1 = x1L1;
+  x1L1 = inL;
+  y2L1 = y1L1;
+  y1L1 = o1L;
+  slider2 >= 0.5 ? (
+    o2L = b0_2*o1L + b1_2*x1L2 + b2_2*x2L2 - a1_2*y1L2 - a2_2*y2L2;
+    x2L2 = x1L2;
+    x1L2 = o1L;
+    y2L2 = y1L2;
+    y1L2 = o2L;
+  );
+  spl0 = slider2 >= 0.5 ? o2L : o1L;
+
+  o1R = b0_1*inR + b1_1*x1R1 + b2_1*x2R1 - a1_1*y1R1 - a2_1*y2R1;
+  x2R1 = x1R1;
+  x1R1 = inR;
+  y2R1 = y1R1;
+  y1R1 = o1R;
+  slider2 >= 0.5 ? (
+    o2R = b0_2*o1R + b1_2*x1R2 + b2_2*x2R2 - a1_2*y1R2 - a2_2*y2R2;
+    x2R2 = x1R2;
+    x1R2 = o1R;
+    y2R2 = y1R2;
+    y1R2 = o2R;
+  );
+  spl1 = slider2 >= 0.5 ? o2R : o1R;
+);
+
+@gfx 150 40
+embedded = gfx_ext_flags & 1;
+gfx_clear = 0x1a1a1a;
+gfx_setfont(1, "Arial", 24);
+cur_f = clamp_freq(slider1);
+slope_24 = slider2 >= 0.5;
+embedded ? (
+  sprintf(#lp_str, "LP");
+  slope_24 ? sprintf(#order_str, "4") : sprintf(#order_str, "2");
+  sprintf(#colon_str, ": ");
+  cur_f >= 1000 ? (
+    sprintf(#freq_str, "%.1f kHz", cur_f/1000);
+  ) : (
+    sprintf(#freq_str, "%d Hz", cur_f);
+  );
+) : (
+  sprintf(#prefix_str, "High Cut: ");
+  cur_f >= 1000 ? (
+    slope_24 ? sprintf(#freq_str, "%.1f kHz 24dB", cur_f/1000) : sprintf(#freq_str, "%.1f kHz 12dB", cur_f/1000);
+  ) : (
+    slope_24 ? sprintf(#freq_str, "%d Hz 24dB", cur_f) : sprintf(#freq_str, "%d Hz 12dB", cur_f);
+  );
+);
+pad_left = 8;
+pad_gap = 0;
+embedded ? (
+  gfx_measurestr(#lp_str, lp_w, str_h);
+  gfx_measurestr(#order_str, order_w, str_h);
+  gfx_measurestr(#colon_str, colon_w, str_h);
+  gfx_measurestr(#freq_str, freq_w, str_h);
+  freq_zone_left = pad_left + lp_w + order_w + colon_w + pad_gap;
+) : (
+  gfx_measurestr(#prefix_str, prefix_w, str_h);
+  gfx_measurestr(#freq_str, freq_w, str_h);
+  freq_zone_left = pad_left + prefix_w + pad_gap;
+);
+gfx_y = (gfx_h - str_h) * 0.5;
+gfx_x = pad_left;
+embedded ? (
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#lp_str);
+  gfx_x = pad_left + lp_w;
+  gfx_r = 0.88; gfx_g = 0.88; gfx_b = 0.88; gfx_a = 1;
+  gfx_drawstr(#order_str);
+  gfx_x = pad_left + lp_w + order_w;
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#colon_str);
+) : (
+  gfx_r = 1; gfx_g = 1; gfx_b = 1; gfx_a = 1;
+  gfx_drawstr(#prefix_str);
+);
+freq_zone_width = gfx_w - freq_zone_left;
+freq_norm = log(cur_f / 20) / log(1000);
+hue = freq_norm * 0.78;
+hsl_L = 0.75;
+hsl_S = 1;
+hsl_q = hsl_L < 0.5 ? hsl_L * (1 + hsl_S) : hsl_L + hsl_S - hsl_L * hsl_S;
+hsl_p = 2 * hsl_L - hsl_q;
+function hue2rgb(p, q, t)
+(
+  t = t < 0 ? t + 1 : t;
+  t = t > 1 ? t - 1 : t;
+  t < 0.166667 ? (p + (q - p) * 6 * t) : (
+  t < 0.5 ? q : (
+  t < 0.666667 ? (p + (q - p) * (0.666667 - t) * 6) : p));
+);
+gfx_r = hue2rgb(hsl_p, hsl_q, hue + 0.333333);
+gfx_g = hue2rgb(hsl_p, hsl_q, hue);
+gfx_b = hue2rgb(hsl_p, hsl_q, hue - 0.333333);
+gfx_a = 1;
+gfx_x = freq_zone_left;
+gfx_drawstr(#freq_str);
+!embedded ? (
+  mouse_wheel != 0 ? (
+    norm = log(slider1 / 20) / log(1000);
+    norm = norm + mouse_wheel * 0.0008;
+    norm = norm < 0 ? 0 : norm;
+    norm = norm > 1 ? 1 : norm;
+    slider1 = 20 * (1000 ^ norm);
+    slider_automate(slider1);
+    mouse_wheel = 0;
+  );
+  (gfx_mouse_cap & 1) ? (
+    drag_active == 0 ? (
+      drag_active = 1;
+      drag_prev_x = gfx_mouse_x;
+    );
+    dx = gfx_mouse_x - drag_prev_x;
+    drag_prev_x = gfx_mouse_x;
+    norm = log(slider1 / 20) / log(1000);
+    norm = norm + dx / (gfx_w > 0 ? gfx_w : 150);
+    norm = norm < 0 ? 0 : norm;
+    norm = norm > 1 ? 1 : norm;
+    slider1 = 20 * (1000 ^ norm);
+    slider_automate(slider1);
+  ) : (
+    drag_active = 0;
+  );
+);
+]]
+
+JSFX.PRESET_LOW_CUT_24_EMBEDDED = [[[General]
+NbPresets=1
+
+[Preset0]
+Data=32302031202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202244656661756C74204850223A
+Len=141
+Name=Default HP
+
+]]
+
+JSFX.PRESET_HIGH_CUT_24_EMBEDDED = [[[General]
+NbPresets=2
+
+[Preset0]
+Data=32303030302030202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202244656661756C7420554922CF
+Len=144
+Name=Default UI
+
+[Preset1]
+Data=32303030302030202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202D202244656661756C74204C5022CD
+Len=144
+Name=Default LP
+
+]]
+
+return JSFX

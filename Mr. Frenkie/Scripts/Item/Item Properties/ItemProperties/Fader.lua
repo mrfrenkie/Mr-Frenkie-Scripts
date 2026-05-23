@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 
@@ -84,6 +85,7 @@ function Fader.VolumeControl(ctx, items, props, bar_color, UI)
     if item_count > 1 then
         UI.ExtendAggHoverRegion(ctx)
     end
+    UI.QueueStyledTooltipDelayed(ctx, 'fip_vol_rst', UI.GetVolumeFaderTooltipLines(), 1.0)
     r.ImGui_SameLine(ctx, 0, 2)
     r.ImGui_SetNextItemWidth(ctx, 120)
 
@@ -107,6 +109,8 @@ function Fader.VolumeControl(ctx, items, props, bar_color, UI)
         UI.DrawAggregationOutline(ctx, nil, 4, 0)
         UI.ExtendAggHoverRegion(ctx)
     end
+
+    UI.QueueStyledTooltipDelayed(ctx, 'fip_vol_slider', UI.GetVolumeFaderTooltipLines(), 1.0)
 
     if (not is_multi) and vol_activated and r.APIExists and r.APIExists("FIP_VolumeFaderBegin") then
         r.FIP_VolumeFaderBegin("", 0)
@@ -183,6 +187,7 @@ function Fader.VelocityControl(ctx, items, props, bar_color, UI)
     if item_count > 1 then
         UI.ExtendAggHoverRegion(ctx)
     end
+    UI.QueueStyledTooltipDelayed(ctx, 'fip_vel_rst', UI.GetVelocityFaderTooltipLines(), 1.0)
     r.ImGui_SameLine(ctx, 0, 2)
     r.ImGui_SetNextItemWidth(ctx, 120)
 
@@ -206,6 +211,8 @@ function Fader.VelocityControl(ctx, items, props, bar_color, UI)
         UI.DrawAggregationOutline(ctx, nil, 4, 0)
         UI.ExtendAggHoverRegion(ctx)
     end
+
+    UI.QueueStyledTooltipDelayed(ctx, 'fip_vel_slider', UI.GetVelocityFaderTooltipLines(), 1.0)
 
     if (not is_multi) and vel_activated and r.APIExists and r.APIExists("FIP_VelocityFaderBegin") then
         r.FIP_VelocityFaderBegin("", 0)

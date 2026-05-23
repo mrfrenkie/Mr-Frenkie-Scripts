@@ -1,3 +1,4 @@
+-- @noindex
 ---@diagnostic disable: undefined-global, undefined-field
 local r = reaper
 local Theme = {}
@@ -51,7 +52,13 @@ Theme.colors = {
     frame_disabled = Theme.rgba(48, 48, 48, 255),   -- Фон контролов в disabled
 
     hover_white_32 = Theme.rgba(255, 255, 255, 32), -- Светлая подсветка hover для прозрачных кнопок
-    active_white_64 = Theme.rgba(255, 255, 255, 64) -- Светлая подсветка active для прозрачных кнопок
+    active_white_64 = Theme.rgba(255, 255, 255, 64), -- Светлая подсветка active для прозрачных кнопок
+
+    tooltip_bg = Theme.rgba(176, 176, 176, 217),
+    tooltip_border = Theme.rgba(0, 0, 0, 0),
+    tooltip_text = Theme.rgba(0, 0, 0, 255),
+    tooltip_fx_bypass = Theme.rgba(180, 85, 0, 255),
+    tooltip_fx_disabled = Theme.rgba(120, 38, 38, 255),
 }
 
 function Theme.get(name)
